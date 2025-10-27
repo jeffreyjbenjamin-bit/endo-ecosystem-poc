@@ -27,10 +27,11 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Run PoC main.py if present
+      - name: Install dependencies
         run: |
-          if [ -f "src/main.py" ]; then
-            python src/main.py
-          else
-            echo "No src/main.py yet — skipping."
-          fi
+          python -m pip install --upgrade pip
+          if [ -f "requirements.txt" ]; then pip install -r requirements.txt; fi
+
+      - name: Run PoC main.py
+        run: python src/main.py
+
