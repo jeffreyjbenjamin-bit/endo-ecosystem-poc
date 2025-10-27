@@ -1,0 +1,29 @@
+import subprocess
+import sys
+from pathlib import Path
+
+def test_main_runs_and_prints_greeting():
+    # Run the main script as a subprocess so we test the entrypoint behavior
+    proc = subprocess.run(
+        [sys.executable, str(Path("src") / "main.py")],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    out = proc.stdout
+    assert "Hello from the Endo Ecosystem PoC!" in out
+    assert "Python version:" in out
+import subprocess
+import sys
+from pathlib import Path
+
+def test_main_runs_and_prints_greeting():
+    proc = subprocess.run(
+        [sys.executable, str(Path("src") / "main.py")],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    out = proc.stdout
+    assert "Hello from the Endo Ecosystem PoC!" in out
+    assert "Python version:" in out

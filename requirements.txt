@@ -1,2 +1,5 @@
 # Core dependencies for PoC
 requests
+# Core dependencies for PoC
+requests
+pytest
