@@ -8,6 +8,7 @@ can execute Python code correctly.
 import datetime
 import platform
 
+
 def main():
     print("=" * 60)
     print("Hello from the Endo Ecosystem PoC!")
@@ -15,6 +16,7 @@ def main():
     print(f"Platform: {platform.system()} {platform.release()}")
     print(f"Timestamp: {datetime.datetime.now()}")
     print("=" * 60)
+
 
 if __name__ == "__main__":
     main()
