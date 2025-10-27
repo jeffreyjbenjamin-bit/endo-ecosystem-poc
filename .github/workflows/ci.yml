@@ -1,0 +1,36 @@
+name: CI (PoC placeholder)
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Show basic context
+        run: |
+          echo "Branch: ${{ github.ref }}"
+          echo "Commit: ${{ github.sha }}"
+          echo "Actor:  ${{ github.actor }}"
+          echo "Repo:   ${{ github.repository }}"
+          ls -la
+
+      - name: Set up Python (3.11)
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Run PoC main.py if present
+        run: |
+          if [ -f "src/main.py" ]; then
+            python src/main.py
+          else
+            echo "No src/main.py yet — skipping."
+          fi
