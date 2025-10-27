@@ -3,10 +3,6 @@ import sys
 from pathlib import Path
 
 
-import subprocess
-import sys
-from pathlib import Path
-
 def test_main_runs_and_prints_greeting():
     proc = subprocess.run(
         [sys.executable, str(Path("src") / "main.py")],
