@@ -3,13 +3,14 @@
   "configurations": [
     {
       "name": "Run PoC main.py",
-      "type": "debugpy",
+      "type": "python",
       "request": "launch",
       "program": "${workspaceFolder}/src/main.py",
       "console": "integratedTerminal",
       "env": {
         "PYTHONWARNINGS": "ignore"
-      }
+      },
+      "envFile": "${workspaceFolder}/.env"
     }
   ]
 }
