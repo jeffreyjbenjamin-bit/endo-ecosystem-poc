@@ -2,15 +2,13 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Run PoC main.py",
+      "name": "Run ingest (ctgov only, dry)",
       "type": "python",
       "request": "launch",
-      "program": "${workspaceFolder}/src/main.py",
+      "module": "src.ingest",
       "console": "integratedTerminal",
-      "env": {
-        "PYTHONWARNINGS": "ignore"
-      },
-      "envFile": "${workspaceFolder}/.env"
+      "envFile": "${workspaceFolder}/.env",
+      "justMyCode": true
     }
   ]
 }

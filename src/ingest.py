@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, TypedDict
 import requests
+from urllib.parse import urlencode
+import sys
+import json
 
 __all__ = ["http_get_json", "ping", "ctgov_search_endometriosis"]
 
@@ -109,7 +112,10 @@ def ctgov_search_endometriosis(
     """
     # --- v2 attempt
     try:
-        v2_url = f"{base_v2.rstrip('/')}/studies?query.term=endometriosis&pageSize={int(limit)}"
+        base = base_v2.rstrip("/")
+        # Official v2 docs: https://clinicaltrials.gov/data-api/api
+        # /studies?query.term=...&pageSize=...
+        v2_url = f"{base}/studies?{urlencode({'query.term': 'endometriosis', 'pageSize': int(limit)})}"
         resp = requests.get(
             v2_url,
             timeout=timeout,
@@ -166,3 +172,11 @@ def ctgov_search_endometriosis(
                 "status": None,
             }
         ]
+
+
+if __name__ == "__main__":
+    # Quick local sanity run:
+    base_v2 = "https://clinicaltrials.gov/api/v2"
+    results = ctgov_search_endometriosis(base_v2, limit=5)
+    print(json.dumps(results, indent=2))
+    sys.exit(0)
