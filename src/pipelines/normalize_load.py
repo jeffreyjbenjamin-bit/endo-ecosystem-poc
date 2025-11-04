@@ -18,6 +18,10 @@ def _iter_local_raw():
         yield ("ema", path)
     for path in glob.glob("./raw/fda/**/*.json", recursive=True):
         yield ("fda", path)
+    for path in glob.glob("./raw/biorxiv/**/*.json", recursive=True):
+        yield ("biorxiv", path)
+    for path in glob.glob("./raw/medrxiv/**/*.json", recursive=True):
+        yield ("medrxiv", path)
 
 
 def main():
@@ -39,7 +43,7 @@ def main():
         elif kind == "nih_reporter":
             for d in nih_reporter.to_docs(payload):
                 upsert_document(conn, finalize(d))
-        elif kind in {"ema", "fda"}:
+        elif kind in {"ema", "fda", "biorxiv", "medrxiv"}:
             for d in payload.get("entries", []):
                 upsert_document(conn, finalize(d))
 

@@ -1,5 +1,5 @@
 import argparse
-from src.connectors import pubmed, ctgov, openalex, nih_reporter, regulators
+from src.connectors import pubmed, ctgov, openalex, nih_reporter, regulators, preprints
 from src.common.storage import save_raw_json
 
 
@@ -32,6 +32,12 @@ def main():
     uri_ema = save_raw_json("ema", "batch", {"entries": ema_entries})
     uri_fda = save_raw_json("fda", "batch", {"entries": fda_entries})
 
+    # Preprints (bioRxiv + medRxiv)
+    biorxiv_entries = list(preprints.biorxiv_items())
+    medrxiv_entries = list(preprints.medrxiv_items())
+    uri_bio = save_raw_json("biorxiv", "batch", {"entries": biorxiv_entries})
+    uri_med = save_raw_json("medrxiv", "batch", {"entries": medrxiv_entries})
+
     print("Saved raw:")
     print("  PubMed       ->", uri_pubmed)
     print("  CT.gov       ->", uri_ctgov)
@@ -39,6 +45,8 @@ def main():
     print("  NIH RePORTER ->", uri_nih)
     print(f"  EMA          -> {uri_ema} ({len(ema_entries)} items)")
     print(f"  FDA          -> {uri_fda} ({len(fda_entries)} items)")
+    print("  bioRxiv     ->", f"{uri_bio} ({len(biorxiv_entries)} items)")
+    print("  medRxiv     ->", f"{uri_med} ({len(medrxiv_entries)} items)")
 
 
 if __name__ == "__main__":
