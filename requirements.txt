@@ -12,3 +12,8 @@ black
 ruff
 
 python-dotenv
+requests
+typer
+python-dotenv
+boto3
+azure-storage-blob
