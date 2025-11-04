@@ -1,5 +1,13 @@
 import argparse
-from src.connectors import pubmed, ctgov, openalex, nih_reporter, regulators, preprints
+from src.connectors import (
+    pubmed,
+    ctgov,
+    openalex,
+    nih_reporter,
+    regulators,
+    preprints,
+    web_search,
+)
 from src.common.storage import save_raw_json
 
 
@@ -37,6 +45,15 @@ def main():
     medrxiv_entries = list(preprints.medrxiv_items())
     uri_bio = save_raw_json("biorxiv", "batch", {"entries": biorxiv_entries})
     uri_med = save_raw_json("medrxiv", "batch", {"entries": medrxiv_entries})
+
+    # Web Search (Google CSE)
+    try:
+        web_payload = web_search.search_google_cse(query=args.term, num=10)
+        uri_web = save_raw_json("web_search", "batch", web_payload)
+        count_web = len(web_payload.get("items", []) or [])
+        print("  Web Search  ->", f"{uri_web} ({count_web} items)")
+    except Exception as e:
+        print("  Web Search  -> skipped:", e)
 
     print("Saved raw:")
     print("  PubMed       ->", uri_pubmed)

@@ -1,6 +1,12 @@
 import glob
 import json
-from src.connectors import pubmed, ctgov, openalex, nih_reporter
+from src.connectors import (
+    pubmed,
+    ctgov,
+    openalex,
+    nih_reporter,
+    web_search,
+)
 from src.common.storage import sqlite_conn, upsert_document
 from src.common.normalize import finalize
 
@@ -22,6 +28,8 @@ def _iter_local_raw():
         yield ("biorxiv", path)
     for path in glob.glob("./raw/medrxiv/**/*.json", recursive=True):
         yield ("medrxiv", path)
+    for path in glob.glob("./raw/web_search/**/*.json", recursive=True):
+        yield ("web_search", path)
 
 
 def main():
@@ -45,6 +53,9 @@ def main():
                 upsert_document(conn, finalize(d))
         elif kind in {"ema", "fda", "biorxiv", "medrxiv"}:
             for d in payload.get("entries", []):
+                upsert_document(conn, finalize(d))
+        elif kind == "web_search":
+            for d in web_search.cse_to_docs(payload):
                 upsert_document(conn, finalize(d))
 
     conn.commit()
