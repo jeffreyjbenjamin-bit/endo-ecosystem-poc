@@ -17,3 +17,4 @@ typer
 python-dotenv
 boto3
 azure-storage-blob
+feedparser
