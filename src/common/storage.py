@@ -11,32 +11,56 @@ SQLITE_PATH = os.getenv("SQLITE_PATH", "./data/documents.db")
 
 
 def save_raw_json(source: str, source_id: str, payload: dict) -> str:
-    key = f"raw/{source}/{datetime.utcnow():%Y%m%d}/{source_id or 'batch'}-{int(datetime.utcnow().timestamp())}.json"
+    blob_key = f"raw/{source}/{datetime.utcnow():%Y%m%d}/{source_id or 'batch'}-{int(datetime.utcnow().timestamp())}.json"
     body = json.dumps(payload, ensure_ascii=False).encode()
 
     if BACKEND == "s3":
         import boto3
 
-        s3 = boto3.client("s3", region_name=os.getenv("AWS_REGION", "us-east-1"))
         bucket = os.getenv("S3_BUCKET")
-        s3.put_object(Bucket=bucket, Key=key, Body=body, ContentType="application/json")
-        return f"s3://{bucket}/{key}"
+        region = os.getenv("AWS_REGION", "us-east-1")
+        if not bucket:
+            raise ValueError("S3_BUCKET must be set when STORAGE_BACKEND=s3")
+        s3 = boto3.client("s3", region_name=region)
+        s3.put_object(
+            Bucket=bucket, Key=blob_key, Body=body, ContentType="application/json"
+        )
+        return f"s3://{bucket}/{blob_key}"
+
     elif BACKEND == "azureblob":
         from azure.storage.blob import BlobServiceClient
+        from azure.core.exceptions import ResourceExistsError
+
+        account = os.getenv("AZURE_BLOB_ACCOUNT")
+        key_cred = os.getenv("AZURE_BLOB_KEY")
+        container = os.getenv("AZURE_BLOB_CONTAINER")
+
+        if not account or not key_cred or not container:
+            raise ValueError(
+                "AZURE_BLOB_ACCOUNT, AZURE_BLOB_KEY, and AZURE_BLOB_CONTAINER must be set when STORAGE_BACKEND=azureblob"
+            )
 
         svc = BlobServiceClient(
-            account_url=f"https://{os.getenv('AZURE_BLOB_ACCOUNT')}.blob.core.windows.net",
-            credential=os.getenv("AZURE_BLOB_KEY"),
+            account_url=f"https://{account}.blob.core.windows.net",
+            credential=key_cred,
         )
-        container = os.getenv("AZURE_BLOB_CONTAINER")
-        svc.get_container_client(container).upload_blob(key, body, overwrite=True)
-        return f"azblob://{container}/{key}"
-    else:
-        local_path = os.path.join(".", key)
-        pathlib.Path(local_path).parent.mkdir(parents=True, exist_ok=True)
-        with open(local_path, "wb") as f:
-            f.write(body)
-        return local_path
+        container_client = svc.get_container_client(
+            container
+        )  # container is guaranteed non-None above
+        try:
+            container_client.create_container()
+        except ResourceExistsError:
+            pass
+
+        container_client.upload_blob(blob_key, body, overwrite=True)
+        return f"azblob://{container}/{blob_key}"
+
+    # Local fallback
+    local_path = os.path.join(".", blob_key)
+    pathlib.Path(local_path).parent.mkdir(parents=True, exist_ok=True)
+    with open(local_path, "wb") as f:
+        f.write(body)
+    return local_path
 
 
 SQLITE_SCHEMA = """
