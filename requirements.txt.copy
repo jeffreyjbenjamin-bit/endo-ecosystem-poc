@@ -1,0 +1,14 @@
+# Core dependencies for PoC
+requests
+# Core dependencies for PoC
+requests
+pytest
+# Core dependencies for PoC
+requests
+pytest
+
+# Code quality
+black
+ruff
+
+python-dotenv
