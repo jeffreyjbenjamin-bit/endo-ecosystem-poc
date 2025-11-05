@@ -211,3 +211,10 @@ __marimo__/
 /raw/
 /data/*.db
 /data/*.parquet
+# Data artifacts
+/data/*.parquet
+/data/*.sqlite
+/data/*.faiss
+/data/*.jsonl
+/data/*.json
+/data/*.log

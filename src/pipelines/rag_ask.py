@@ -1,18 +1,23 @@
 """
-rag_ask.py — split-resource RAG:
-- Embeddings: uses AZURE_OPENAI_ENDPOINT / AZURE_OPENAI_EMBED_DEPLOYMENT
-- Chat: uses AZURE_OPENAI_CHAT_ENDPOINT / AZURE_OPENAI_CHAT_DEPLOYMENT
+rag_ask.py — split-resource RAG with logging:
+- Embeddings: AZURE_OPENAI_ENDPOINT / AZURE_OPENAI_EMBED_DEPLOYMENT
+- Chat:       AZURE_OPENAI_CHAT_ENDPOINT / AZURE_OPENAI_CHAT_DEPLOYMENT
+- Logs all runs to ./data/rag_logs.sqlite and ./data/rag_logs.jsonl
 """
 
 import os
 import sys
 import json
+import time
 import sqlite3
-from typing import List, Tuple
+from datetime import datetime, timezone
+from typing import List, Tuple, Dict
 
 import numpy as np
 import pandas as pd
 from openai import AzureOpenAI
+
+from src.common.rag_log import log_query
 
 PARQUET_PATH = os.getenv("PARQUET_PATH", "./data/documents.parquet")
 DB_PATH = os.getenv("VECTOR_DB_PATH", "./data/vector_store.sqlite")
@@ -154,7 +159,7 @@ def assemble_context(
     df: pd.DataFrame, ordered_uids: List[str]
 ) -> Tuple[str, List[dict]]:
     snippets, metas, total = [], [], 0
-    for uid in ordered_uids:
+    for rank, uid in enumerate(ordered_uids, start=1):
         m = df.loc[df["uid"] == uid]
         if m.empty:
             continue
@@ -164,7 +169,13 @@ def assemble_context(
             break
         snippets.append(snip)
         metas.append(
-            {"uid": uid, "title": r["title"], "url": r["url"], "source": r["source"]}
+            {
+                "rank": rank,
+                "uid": uid,
+                "title": r["title"],
+                "url": r["url"],
+                "source": r["source"],
+            }
         )
         total += len(snip)
     return "\n\n---\n\n".join(snippets), metas
@@ -177,28 +188,32 @@ SYSTEM_PROMPT = (
 )
 
 
-def chat_answer(question: str, context: str) -> str:
+def chat_answer(question: str, context: str) -> Tuple[str, Dict]:
     client = make_chat_client()
-    try:
-        resp = client.chat.completions.create(
-            model=CHAT_DEPLOYMENT,
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {
-                    "role": "user",
-                    "content": f"Question: {question}\n\nContext:\n{context}",
-                },
-            ],
-            temperature=0.2,
-            max_tokens=700,
-        )
-        return resp.choices[0].message.content.strip()
-    except Exception as e:
-        # Helpful diagnostics for common 404/quota issues
-        raise RuntimeError(
-            f"Chat call failed. Check CHAT envs & deployment.\n"
-            f"endpoint={CHAT_ENDPOINT} deployment={CHAT_DEPLOYMENT} api_version={API_VERSION}\n{e}"
-        ) from e
+    start = time.time()
+    resp = client.chat.completions.create(
+        model=CHAT_DEPLOYMENT,
+        messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": f"Question: {question}\n\nContext:\n{context}"},
+        ],
+        temperature=0.2,
+        max_tokens=700,
+    )
+    latency_ms = int((time.time() - start) * 1000)
+    # usage is sometimes present; if not, keep empty dict
+    usage = getattr(resp, "usage", None)
+    usage_dict = (
+        {
+            "total_tokens": getattr(usage, "total_tokens", None),
+            "prompt_tokens": getattr(usage, "prompt_tokens", None),
+            "completion_tokens": getattr(usage, "completion_tokens", None),
+        }
+        if usage
+        else {}
+    )
+    answer = resp.choices[0].message.content.strip()
+    return answer, {"latency_ms": latency_ms, "usage": usage_dict}
 
 
 def main():
@@ -208,15 +223,17 @@ def main():
     question = sys.argv[1]
     top_k = int(sys.argv[2]) if len(sys.argv) > 2 else 5
 
+    # 1) Embed query
     qvec = embed_text(question)
 
+    # 2) Retrieve
     if have_faiss():
-        matches = faiss_search(qvec, top_k)  # L2 distance (lower is better)
+        matches = faiss_search(qvec, top_k)  # list[(uid, L2)]
         ordered = [uid for uid, _dist in matches]
         used_faiss = True
     else:
         uids, mat = load_all_vectors_from_db()
-        matches = cosine_search(qvec, uids, mat, top_k)  # cosine (higher is better)
+        matches = cosine_search(qvec, uids, mat, top_k)  # list[(uid, cosine)]
         ordered = [uid for uid, _sim in matches]
         used_faiss = False
 
@@ -224,19 +241,67 @@ def main():
         print("No matches found. Did you run embeddings.py?")
         sys.exit(1)
 
+    # 3) Build context + meta docs
     df = load_docs_df()
     context, metas = assemble_context(df, ordered)
-    answer = chat_answer(question, context)
 
+    # 4) Chat
+    answer, perf = chat_answer(question, context)
+
+    # 5) Print result
     print("\n================= ANSWER =================")
     print(answer)
     print("\n================= SOURCES ================")
-    for i, m in enumerate(metas, start=1):
+    for m in metas:
         url_part = f" | {m['url']}" if m.get("url") else ""
         print(
-            f"{i:>2}. {m['title'][:100]}  [uid={m['uid'][:8]} | {m['source']}]{url_part}"
+            f"{m['rank']:>2}. {m['title'][:100]}  [uid={m['uid'][:8]} | {m['source']}]{url_part}"
         )
     print(f"\n(retrieval={'FAISS/L2' if used_faiss else 'cosine/SQLite'})")
+    if perf.get("latency_ms") is not None:
+        print(
+            f"(chat latency: {perf['latency_ms']} ms, tokens: {perf.get('usage',{}).get('total_tokens')})"
+        )
+
+    # 6) Log to cache
+    ts_utc = datetime.now(timezone.utc).isoformat()
+    doc_rows = []
+    # Attach scores if we have them
+    rank_map = {m["uid"]: m["rank"] for m in metas}
+    score_map = {}
+    if used_faiss:
+        score_map.update({uid: float(dist) for uid, dist in matches})
+    else:
+        score_map.update({uid: float(sim) for uid, sim in matches})
+
+    for m in metas:
+        doc_rows.append(
+            {
+                "rank": rank_map.get(m["uid"], m["rank"]),
+                "uid": m["uid"],
+                "score": score_map.get(
+                    m["uid"]
+                ),  # L2 distance (lower better) OR cosine (higher better)
+                "title": m["title"],
+                "source": m["source"],
+                "url": m["url"],
+            }
+        )
+
+    log_query(
+        ts_utc=ts_utc,
+        question=question,
+        top_k=top_k,
+        used_faiss=used_faiss,
+        embed_endpoint=EMBED_ENDPOINT,
+        embed_deployment=EMBED_DEPLOYMENT,
+        chat_endpoint=CHAT_ENDPOINT,
+        chat_deployment=CHAT_DEPLOYMENT,
+        latency_ms=perf.get("latency_ms", 0),
+        usage=perf.get("usage", {}),
+        answer=answer,
+        docs=doc_rows,
+    )
 
 
 if __name__ == "__main__":
