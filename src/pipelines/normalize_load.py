@@ -6,6 +6,8 @@ from src.connectors import (
     openalex,
     nih_reporter,
     web_search,
+    semantic_scholar,
+    crossref,
 )
 from src.common.storage import sqlite_conn, upsert_document
 from src.common.normalize import finalize
@@ -30,6 +32,10 @@ def _iter_local_raw():
         yield ("medrxiv", path)
     for path in glob.glob("./raw/web_search/**/*.json", recursive=True):
         yield ("web_search", path)
+    for path in glob.glob("./raw/semantic_scholar/**/*.json", recursive=True):
+        yield ("semantic_scholar", path)
+    for path in glob.glob("./raw/crossref/**/*.json", recursive=True):
+        yield ("crossref", path)
 
 
 def main():
@@ -56,6 +62,12 @@ def main():
                 upsert_document(conn, finalize(d))
         elif kind == "web_search":
             for d in web_search.cse_to_docs(payload):
+                upsert_document(conn, finalize(d))
+        elif kind == "semantic_scholar":
+            for d in semantic_scholar.to_docs(payload):
+                upsert_document(conn, finalize(d))
+        elif kind == "crossref":
+            for d in crossref.to_docs(payload):
                 upsert_document(conn, finalize(d))
 
     conn.commit()

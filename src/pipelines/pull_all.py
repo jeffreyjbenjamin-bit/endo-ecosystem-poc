@@ -7,6 +7,8 @@ from src.connectors import (
     regulators,
     preprints,
     web_search,
+    semantic_scholar,
+    crossref,
 )
 from src.common.storage import save_raw_json
 
@@ -64,6 +66,25 @@ def main():
     print(f"  FDA          -> {uri_fda} ({len(fda_entries)} items)")
     print("  bioRxiv     ->", f"{uri_bio} ({len(biorxiv_entries)} items)")
     print("  medRxiv     ->", f"{uri_med} ({len(medrxiv_entries)} items)")
+
+    # Semantic Scholar
+    try:
+        s2_payload = semantic_scholar.search(query=args.term, limit=min(args.limit, 30))
+        uri_s2 = save_raw_json("semantic_scholar", "batch", s2_payload)
+        print(
+            "  Semantic Scholar ->",
+            f"{uri_s2} ({len(s2_payload.get('data', []) or [])} items)",
+        )
+    except Exception as e:
+        print("  Semantic Scholar -> skipped:", e)
+
+    # Crossref
+    cr_payload = crossref.search(query=args.term, limit=min(args.limit, 40))
+    uri_cr = save_raw_json("crossref", "batch", cr_payload)
+    print(
+        "  Crossref     ->",
+        f"{uri_cr} ({len(cr_payload.get('message', {}).get('items', []) or [])} items)",
+    )
 
 
 if __name__ == "__main__":
