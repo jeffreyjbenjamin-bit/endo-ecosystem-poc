@@ -1,24 +1,64 @@
 import os
 import requests
+from datetime import datetime
 
 BASE = os.getenv("NIH_REPORTER_BASE", "https://api.reporter.nih.gov/v2/projects/search")
 
 
-def search(query="endometriosis", limit=100):
+def _recent_fiscal_years(years_back: int) -> list[int]:
+    now = datetime.now().year
+    # e.g., years_back=3 => [2025, 2024, 2023] (assuming now=2025)
+    return list(range(now, now - max(1, years_back), -1))
+
+
+def search(
+    query: str = "endometriosis", limit: int = 100, years_back: int | None = None
+) -> dict:
     """
-    NIH RePORTER uses POST with a JSON body. We'll do a simple textSearch.
-    limit: total results to request (API supports paging; PoC pulls one page up to 'limit').
+    Returns a single merged payload (like before) but internally pages through
+    NIH RePORTER using a fiscal-year filter and per-page caps from .env.
     """
-    body = {
-        "criteria": {"textSearch": query},
-        "offset": 0,
-        "limit": limit,
-        "sortField": "project_start_date",
-        "sortOrder": "desc",
+    years_back = years_back or int(os.getenv("NIH_REPORTER_YEARS_BACK", "3"))
+    per_page = min(int(os.getenv("NIH_REPORTER_PER_PAGE", "200")), 500)
+    max_pages = max(1, int(os.getenv("NIH_REPORTER_MAX_PAGES", "3")))
+
+    fiscal_years = _recent_fiscal_years(years_back)
+
+    merged = {
+        "results": [],
+        "criteria": {"textSearch": query, "fiscal_years": fiscal_years},
     }
-    r = requests.post(BASE, json=body, timeout=60)
-    r.raise_for_status()
-    return r.json()
+    fetched = 0
+    offset = 0
+    pages = 0
+
+    while pages < max_pages and fetched < limit:
+        page_limit = min(per_page, limit - fetched)
+        body = {
+            "criteria": {"textSearch": query, "fiscal_years": fiscal_years},
+            "offset": offset,
+            "limit": page_limit,
+            "sortField": "project_start_date",  # newest first
+            "sortOrder": "desc",
+        }
+        r = requests.post(BASE, json=body, timeout=60)
+        r.raise_for_status()
+        payload = r.json()
+
+        results = payload.get("results", []) or []
+        if not results:
+            break
+
+        merged["results"].extend(results)
+        batch = len(results)
+        fetched += batch
+        offset += batch
+        pages += 1
+
+        # Small courtesy delay; uncomment if you hit rate limits
+        # time.sleep(0.25)
+
+    return merged
 
 
 def to_docs(payload):
