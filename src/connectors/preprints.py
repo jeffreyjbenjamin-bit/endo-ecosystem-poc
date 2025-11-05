@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Iterator, Dict, Any, Optional, List
 import feedparser
+import requests
 from time import struct_time
 
 # Site-wide recent feeds (we'll keyword-filter in code if desired)
@@ -29,11 +30,13 @@ def _matches_keywords(title: Optional[str], summary: Optional[str]) -> bool:
 
 
 def _entries_from_feed(url: str) -> List[Dict[str, Any]]:
-    feed = feedparser.parse(url) or {}
-    entries = feed.get("entries") or []
-    if not entries and hasattr(feed, "entries"):
-        entries = getattr(feed, "entries") or []
-    # Guarantee list[dict]
+    try:
+        r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=30)
+        r.raise_for_status()
+        parsed = feedparser.parse(r.content)
+    except Exception:
+        return []
+    entries = parsed.get("entries") or getattr(parsed, "entries", []) or []
     return [e for e in entries if isinstance(e, dict)]
 
 

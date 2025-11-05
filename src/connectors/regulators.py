@@ -2,21 +2,19 @@ from __future__ import annotations
 
 from typing import Iterator, Dict, Any, Optional, List
 import feedparser
+import requests
 from time import struct_time
 
-# EMA “Press releases” and “Medicines highlights” Atom feeds export
 EMA_FEEDS: List[str] = [
     "https://www.ema.europa.eu/en/news-events/press-releases?export=xml",
     "https://www.ema.europa.eu/en/news-events/medicines-highlights?export=xml",
 ]
 
-# FDA Press Announcements RSS
 FDA_FEEDS: List[str] = [
     "https://www.fda.gov/about-fda/contact-fda/stay-informed/rss-feeds/press-announcements/rss.xml",
 ]
 
-# PoC: keyword filter (set to None/empty to disable)
-KEYWORDS: Optional[set[str]] = None  # {"endometriosis", "adenomyosis"}
+KEYWORDS: Optional[set[str]] = None  # keep disabled for PoC
 
 
 def _date_from_struct(t: Optional[struct_time]) -> Optional[str]:
@@ -29,20 +27,21 @@ def _date_from_struct(t: Optional[struct_time]) -> Optional[str]:
 
 
 def _matches_keywords(title: Optional[str], summary: Optional[str]) -> bool:
-    if not KEYWORDS:  # filtering disabled for PoC
+    if not KEYWORDS:
         return True
     text = f"{title or ''} {summary or ''}".lower()
     return any(k in text for k in KEYWORDS)
 
 
 def _entries_from_feed(url: str) -> List[Dict[str, Any]]:
-    # Ensure we always return a list, never None
-    feed = feedparser.parse(url) or {}
-    entries = feed.get("entries") or []
-    # Some feedparser versions expose .entries attribute as well
-    if not entries and hasattr(feed, "entries"):
-        entries = getattr(feed, "entries") or []
-    # Guarantee list[dict]
+    # Fetch with requests (real UA), then parse bytes to avoid server blocks
+    try:
+        r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=30)
+        r.raise_for_status()
+        parsed = feedparser.parse(r.content)  # bytes, not URL
+    except Exception:
+        return []
+    entries = parsed.get("entries") or getattr(parsed, "entries", []) or []
     return [e for e in entries if isinstance(e, dict)]
 
 
@@ -55,7 +54,6 @@ def _normalize_entry(
     title = e.get("title") or ""
     summary = e.get("summary") or e.get("description") or ""
 
-    # authors can be missing or None; make it a list
     authors_raw = e.get("authors") or []
     authors_norm = None
     if isinstance(authors_raw, list):
@@ -78,7 +76,7 @@ def _normalize_entry(
         "authors": authors_norm,
         "journal_or_venue": venue,
         "doi": None,
-        "disease": ["endometriosis"],  # PoC tagging; refine later
+        "disease": ["endometriosis"],
         "topics": None,
         "trial_info": None,
         "geos": geos,
@@ -92,7 +90,6 @@ def _normalize_entry(
 
 
 def ema_items() -> Iterator[Dict[str, Any]]:
-    """Yield normalized EMA items (no optional iterables)."""
     for url in EMA_FEEDS:
         for e in _entries_from_feed(url):
             if not _matches_keywords(
@@ -103,7 +100,6 @@ def ema_items() -> Iterator[Dict[str, Any]]:
 
 
 def fda_items() -> Iterator[Dict[str, Any]]:
-    """Yield normalized FDA items (no optional iterables)."""
     for url in FDA_FEEDS:
         for e in _entries_from_feed(url):
             if not _matches_keywords(
