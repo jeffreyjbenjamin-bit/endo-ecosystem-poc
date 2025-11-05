@@ -6,12 +6,13 @@ import requests
 from time import struct_time
 
 EMA_FEEDS: List[str] = [
-    "https://www.ema.europa.eu/en/news-events/press-releases?export=xml",
-    "https://www.ema.europa.eu/en/news-events/medicines-highlights?export=xml",
+    "https://www.ema.europa.eu/en/news.xml",
+    "https://www.ema.europa.eu/en/new-human-medicine-new.xml",
 ]
 
 FDA_FEEDS: List[str] = [
-    "https://www.fda.gov/about-fda/contact-fda/stay-informed/rss-feeds/press-announcements/rss.xml",
+    "https://www.fda.gov/about-fda/contact-fda/stay-informed/rss-feeds/press-releases/rss.xml",
+    "https://www.fda.gov/about-fda/contact-fda/stay-informed/rss-feeds/medwatch/rss.xml",
 ]
 
 KEYWORDS: Optional[set[str]] = None  # keep disabled for PoC
