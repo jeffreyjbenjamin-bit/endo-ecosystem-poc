@@ -11,6 +11,13 @@ import pandas as pd
 import streamlit as st
 from openai import AzureOpenAI
 
+PARQUET_PATH = os.getenv("PARQUET_PATH", "./data/documents.parquet")
+DB_PATH = os.getenv("VECTOR_DB_PATH", "./data/vector_store.sqlite")
+LOG_DB_PATH = "./data/rag_logs.sqlite"
+FAISS_INDEX_PATH = os.getenv("FAISS_INDEX_PATH", "./data/vector_store.faiss")
+FAISS_UIDS_PATH = os.getenv("FAISS_UIDS_PATH", "./data/vector_store.uids.json")
+API_VERSION = os.getenv("OPENAI_API_VERSION", "2024-12-01-preview")
+
 # --- ensure package path works when run via Streamlit ---
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 if PROJECT_ROOT not in sys.path:
@@ -22,11 +29,8 @@ except Exception:
     from common.rag_log import log_query
 
 # ---------- Config / Paths ----------
-PARQUET_PATH = os.getenv("PARQUET_PATH", "./data/documents.parquet")
-DB_PATH = os.getenv("VECTOR_DB_PATH", "./data/vector_store.sqlite")
+
 LOG_DB_PATH = "./data/rag_logs.sqlite"
-FAISS_INDEX_PATH = "./data/vector_store.faiss"
-FAISS_UIDS_PATH = "./data/vector_store.uids.json"
 API_VERSION = os.getenv("OPENAI_API_VERSION", "2024-12-01-preview")
 
 # Embeddings (resource A)

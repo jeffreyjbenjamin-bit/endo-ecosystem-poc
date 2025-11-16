@@ -21,9 +21,8 @@ from src.common.rag_log import log_query
 
 PARQUET_PATH = os.getenv("PARQUET_PATH", "./data/documents.parquet")
 DB_PATH = os.getenv("VECTOR_DB_PATH", "./data/vector_store.sqlite")
-FAISS_INDEX_PATH = "./data/vector_store.faiss"
-FAISS_UIDS_PATH = "./data/vector_store.uids.json"
-
+FAISS_INDEX_PATH = os.getenv("FAISS_INDEX_PATH", "./data/vector_store.faiss")
+FAISS_UIDS_PATH = os.getenv("FAISS_UIDS_PATH", "./data/vector_store.uids.json")
 API_VERSION = os.getenv("OPENAI_API_VERSION", "2024-12-01-preview")
 
 # Embedding env (resource A)

@@ -15,13 +15,14 @@ import sys
 import sqlite3
 import numpy as np
 import pandas as pd
-
 from openai import AzureOpenAI
+
+# ---------- Config / Paths ----------
 
 PARQUET_PATH = os.getenv("PARQUET_PATH", "./data/documents.parquet")
 DB_PATH = os.getenv("VECTOR_DB_PATH", "./data/vector_store.sqlite")
-FAISS_INDEX_PATH = "./data/vector_store.faiss"
-FAISS_UIDS_PATH = "./data/vector_store.uids.json"
+FAISS_INDEX_PATH = os.getenv("FAISS_INDEX_PATH", "./data/vector_store.faiss")
+FAISS_UIDS_PATH = os.getenv("FAISS_UIDS_PATH", "./data/vector_store.uids.json")
 API_VERSION = os.getenv("OPENAI_API_VERSION", "2024-12-01-preview")
 
 # Embeddings (resource A)
