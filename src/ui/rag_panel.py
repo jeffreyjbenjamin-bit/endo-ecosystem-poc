@@ -326,9 +326,3 @@ with tab2:
                     if st.button("Re-run", key=f"r{qid}"):
                         st.session_state["rerun_query"] = q
                         st.experimental_rerun()
-
-# Allow single-click re-run
-if "rerun_query" in st.session_state:
-    st.switch_page(
-        "src/ui/rag_panel.py"
-    )  # reloads and puts query in box (works best when app rerun manually)
