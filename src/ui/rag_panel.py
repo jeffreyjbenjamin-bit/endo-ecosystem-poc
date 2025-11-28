@@ -292,6 +292,40 @@ if model_choice == "GPT-5.1 (default)":
 else:
     CHAT_DEPLOYMENT = CHAT_DEPLOYMENT_4O
 
+with st.sidebar:
+    st.subheader("Dataset Controls")
+
+    if st.button("🔄 Update Dataset", type="primary"):
+        st.write("### Updating Dataset…")
+        progress = st.progress(0)
+        output = st.empty()
+
+        def run_step(step_name, cmd, pct):
+            output.write(f"**{step_name}** running…")
+            result = os.popen(cmd).read()
+            output.write(f"```\n{result}\n```")
+            progress.progress(pct)
+
+        try:
+            # 1. Pull
+            run_step("Pulling raw data", "python src/pipelines/pull_all.py", 25)
+
+            # 2. Normalize
+            run_step(
+                "Normalizing + Loading", "python src/pipelines/normalize_load.py", 50
+            )
+
+            # 3. Embeddings
+            run_step("Generating Embeddings", "python src/pipelines/embeddings.py", 75)
+
+            # 4. Health check
+            run_step("Health Check", "python src/pipelines/health_check.py", 100)
+
+            st.success("Dataset successfully updated!")
+
+        except Exception as e:
+            st.error(f"❌ Update failed: {e}")
+
 
 # ---------- TAB 1 ----------
 with tab1:
