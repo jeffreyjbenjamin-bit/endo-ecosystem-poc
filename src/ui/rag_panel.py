@@ -237,13 +237,52 @@ def chat_answer(question: str, context: str):
 
 # ---------- UI ----------
 st.set_page_config(page_title="Endo PoC — RAG Panel", layout="wide")
+
+blue = "#1F6FEB"  # Azure blue
+green = "#2ECC71"  # Soft biotech green
+bg_light = "#F5FAFD"  # Pale blue/green background
+text_dark = "#0A2540"
+
+st.markdown(
+    f"""
+    <style>
+        .main {{
+            background-color: {bg_light};
+        }}
+        .stButton>button {{
+            background-color: {blue};
+            color: white;
+            border-radius: 8px;
+            padding: 0.6em 1.2em;
+            border: none;
+        }}
+        .stButton>button:hover {{
+            background-color: {green};
+            color: white;
+        }}
+        /* Title */
+        .st-emotion-cache-10trblm {{
+            color: {text_dark};
+        }}
+        /* Radio buttons */
+        .st-emotion-cache-1m1v06i label {{
+            color: {text_dark};
+        }}
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 st.title("Endo PoC — RAG Panel")
 
 tab1, tab2 = st.tabs(["🔍 Ask", "🕓 History"])
 
 with st.sidebar:
-    st.subheader("Endpoints")
-    st.code(EMBED_ENDPOINT, language="text")
+    st.subheader("Model Settings")
+    st.markdown("*(Endpoints hidden for security)*")
+
+    st.markdown("**Embeddings Endpoint:** 🔒 Hidden")
+    st.markdown("**Chat Endpoint:** 🔒 Hidden")
 
     # Model selector
     model_choice = st.radio("Model", ["GPT-5.1 (default)", "GPT-4o-mini"], index=0)

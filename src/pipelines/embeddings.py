@@ -1,31 +1,31 @@
 """
 embeddings.py — generate vector embeddings for documents.parquet using Azure OpenAI
 
-- Ensures ./data exists
-- Robust batching with retry/backoff
-- Skips already-embedded UIDs (idempotent)
-- Stores float32 vectors in SQLite (BLOB) with a 'dim' column
-- Optional FAISS index + uids sidecar (with Pylance-friendly add)
+Fully updated for the NEW Azure OpenAI / Azure AI Inference API.
 """
 
+# ---- Imports (must be first for Ruff E402 compliance) ----
 import os
-import json
 import time
 import sqlite3
-from typing import List, Tuple, Any
+from typing import List, Tuple
 
+from dotenv import load_dotenv
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
-from openai import AzureOpenAI
+from openai import OpenAI
 
-# Optional FAISS (fast local ANN)
+# Optional FAISS
 try:
-    import faiss
 
     USE_FAISS = True
 except Exception:
     USE_FAISS = False
+
+
+load_dotenv()
+
 
 # --------------------------------------------------------
 # CONFIG
@@ -34,14 +34,14 @@ except Exception:
 PARQUET_PATH = os.getenv("PARQUET_PATH", "./data/documents.parquet")
 DB_PATH = os.getenv("VECTOR_DB_PATH", "./data/vector_store.sqlite")
 
-AZURE_OPENAI_ENDPOINT = os.getenv(
-    "AZURE_OPENAI_ENDPOINT", "https://boldwave-openai-dev.openai.azure.com/"
-)
-AZURE_OPENAI_API_KEY = os.getenv("AZURE_OPENAI_API_KEY")  # must be set in env
+AZURE_OPENAI_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT")  # MUST end with '/'
+AZURE_OPENAI_KEY = os.getenv("AZURE_OPENAI_API_KEY")
 AZURE_OPENAI_EMBED_DEPLOYMENT = os.getenv(
     "AZURE_OPENAI_EMBED_DEPLOYMENT", "text-embedding-3-large"
 )
-OPENAI_API_VERSION = os.getenv("OPENAI_API_VERSION", "2024-12-01-preview")
+
+# Embeddings API version (Azure required)
+EMBED_API_VERSION = "2023-05-15"
 
 BATCH_SIZE = int(os.getenv("EMBED_BATCH", "64"))
 TEXT_CHAR_LIMIT = int(os.getenv("EMBED_TEXT_CHAR_LIMIT", "8000"))
@@ -49,8 +49,9 @@ TEXT_CHAR_LIMIT = int(os.getenv("EMBED_TEXT_CHAR_LIMIT", "8000"))
 FAISS_INDEX_PATH = "./data/vector_store.faiss"
 FAISS_UIDS_PATH = "./data/vector_store.uids.json"
 
+
 # --------------------------------------------------------
-# UTIL
+# PATH HELPERS
 # --------------------------------------------------------
 
 
@@ -66,28 +67,39 @@ def chunked(iterable, n: int):
 
 
 # --------------------------------------------------------
-# CLIENT
+# CLIENT (CORRECT FOR AZURE)
 # --------------------------------------------------------
 
 
-def make_client() -> Tuple[AzureOpenAI, str]:
-    if not AZURE_OPENAI_API_KEY:
-        raise RuntimeError("AZURE_OPENAI_API_KEY is not set in the environment.")
-    client = AzureOpenAI(
-        api_key=AZURE_OPENAI_API_KEY,
-        api_version=OPENAI_API_VERSION,
-        azure_endpoint=AZURE_OPENAI_ENDPOINT,
+def make_embed_client() -> OpenAI:
+    """
+    Uses the new Azure AI Inference API format:
+        <endpoint>/openai/deployments/<deployment_name>/
+    """
+    if not AZURE_OPENAI_KEY:
+        raise RuntimeError("AZURE_OPENAI_API_KEY is not set")
+
+    if not AZURE_OPENAI_ENDPOINT:
+        raise RuntimeError("AZURE_OPENAI_ENDPOINT is not set")
+
+    if not AZURE_OPENAI_ENDPOINT.endswith("/"):
+        raise RuntimeError("AZURE_OPENAI_ENDPOINT must end with '/'")
+
+    base = (
+        f"{AZURE_OPENAI_ENDPOINT}"
+        f"openai/deployments/{AZURE_OPENAI_EMBED_DEPLOYMENT}/"
     )
-    deploy = AZURE_OPENAI_EMBED_DEPLOYMENT
-    if not deploy:
-        raise RuntimeError(
-            "AZURE_OPENAI_EMBED_DEPLOYMENT is not set in the environment."
-        )
-    return client, deploy
+
+    print("Embed base_url =", base)
+
+    return OpenAI(
+        api_key=AZURE_OPENAI_KEY,
+        base_url=base,
+    )
 
 
 # --------------------------------------------------------
-# STORAGE (SQLite)
+# STORAGE
 # --------------------------------------------------------
 
 
@@ -99,14 +111,6 @@ def ensure_tables(conn: sqlite3.Connection) -> None:
             uid    TEXT PRIMARY KEY,
             dim    INTEGER NOT NULL,
             vector BLOB    NOT NULL
-        )
-    """
-    )
-    cur.execute(
-        """
-        CREATE TABLE IF NOT EXISTS meta (
-            key TEXT PRIMARY KEY,
-            value TEXT NOT NULL
         )
     """
     )
@@ -142,34 +146,33 @@ def build_text(row: pd.Series) -> str:
     for key in ("title", "abstract", "summary", "description"):
         if key in row and isinstance(row[key], str) and row[key].strip():
             parts.append(row[key].strip())
-    if not parts and "text" in row:
-        return str(row["text"])[:TEXT_CHAR_LIMIT]
-    return (" ".join(parts))[:TEXT_CHAR_LIMIT]
+    return (" ".join(parts))[:TEXT_CHAR_LIMIT] if parts else ""
 
 
-def embed_batch(client: Any, deployment: str, texts: List[str]) -> List[List[float]]:
+def embed_batch(client: OpenAI, texts: List[str]) -> List[List[float]]:
     """
-    Call Azure OpenAI Embeddings for a batch of texts.
-    Explicitly returns a list on success or raises the last error after retries.
+    Calls Azure embedding endpoint.
     """
     max_retries = 5
     delay = 1.0
-    last_err: Exception | None = None
+    last = None
 
-    for _ in range(max_retries):
+    for attempt in range(max_retries):
         try:
             resp = client.embeddings.create(
-                model=deployment,  # Azure uses the *deployment name*
                 input=texts,
+                model=AZURE_OPENAI_EMBED_DEPLOYMENT,
+                extra_query={"api-version": EMBED_API_VERSION},
             )
-            return [d.embedding for d in resp.data]
-        except Exception as e:
-            last_err = e
-            time.sleep(delay)
-            delay *= 2.0
+            return [item.embedding for item in resp.data]
 
-    assert last_err is not None
-    raise last_err
+        except Exception as e:
+            last = e
+            print(f"Retry {attempt+1}/5 after error: {e}")
+            time.sleep(delay)
+            delay *= 2
+
+    raise last
 
 
 # --------------------------------------------------------
@@ -178,123 +181,61 @@ def embed_batch(client: Any, deployment: str, texts: List[str]) -> List[List[flo
 
 
 def main():
-    # Helpful path debug
-    print("cwd =", os.path.abspath(os.getcwd()))
-    print("PARQUET_PATH =", os.path.abspath(PARQUET_PATH))
-    print("VECTOR_DB_PATH =", os.path.abspath(DB_PATH))
+    print("=== Embedding Generator ===")
+    print("Using endpoint:", AZURE_OPENAI_ENDPOINT)
+    print("Using deployment:", AZURE_OPENAI_EMBED_DEPLOYMENT)
 
-    # Ensure ./data exists for read/write paths
-    ensure_parent_dir(PARQUET_PATH)
     ensure_parent_dir(DB_PATH)
     ensure_parent_dir(FAISS_INDEX_PATH)
-    ensure_parent_dir(FAISS_UIDS_PATH)
 
     if not os.path.exists(PARQUET_PATH):
-        raise FileNotFoundError(
-            f"Parquet not found at {PARQUET_PATH}. Run normalize first to create it."
-        )
+        raise FileNotFoundError(f"Missing parquet: {PARQUET_PATH}")
 
-    print(f"📘 Loading documents from {PARQUET_PATH} ...")
     df = pd.read_parquet(PARQUET_PATH).fillna("")
     if "uid" not in df.columns:
-        raise RuntimeError("documents.parquet is missing required 'uid' column.")
-    print(f"Loaded {len(df)} documents")
+        raise RuntimeError("Parquet missing 'uid' column.")
 
-    # Prepare texts
     df["__text"] = df.apply(build_text, axis=1)
     uids = df["uid"].tolist()
     texts = df["__text"].tolist()
 
-    client, deployment = make_client()
-    print(f"🧠 Generating embeddings using Azure deployment '{deployment}'")
+    client = make_embed_client()
 
-    # Open DB, ensure schema, compute worklist
     conn = sqlite3.connect(DB_PATH)
     ensure_tables(conn)
+
     existing = get_existing_uids(conn)
-    todo_pairs = [
-        (u, t) for u, t in zip(uids, texts) if u not in existing and t.strip()
-    ]
-    skipped = len(uids) - len(todo_pairs)
-    if skipped:
-        print(f"⏭️  Skipping {skipped} already-embedded or empty-text records")
+    todo = [(u, t) for u, t in zip(uids, texts) if u not in existing and t.strip()]
 
-    total = len(todo_pairs)
-    if total == 0:
-        print("✅ Nothing to embed — up to date.")
-        conn.close()
-        return
+    print(f"Total docs: {len(uids)}")
+    print(f"Embedding {len(todo)} new rows...")
 
-    all_rows: List[Tuple[str, np.ndarray]] = []
+    all_rows = []
+    batches = list(chunked(todo, BATCH_SIZE))
 
-    # Process in batches
-    batches = list(chunked(todo_pairs, BATCH_SIZE))
-    for batch in tqdm(batches, total=len(batches)):
-        batch_uids = [u for u, _ in batch]
-        batch_texts = [t for _, t in batch]
+    for batch in tqdm(batches):
+        buids = [u for u, _ in batch]
+        btxts = [t for _, t in batch]
+
         try:
-            embs = embed_batch(client, deployment, batch_texts)
+            embs = embed_batch(client, btxts)
         except Exception as e:
-            print(f"⚠️  Batch failed for first UID={batch_uids[0][:8]}: {e}")
+            print("Batch failed:", e)
             continue
 
-        for uid, emb in zip(batch_uids, embs):
+        for uid, emb in zip(buids, embs):
             all_rows.append((uid, np.asarray(emb, dtype=np.float32)))
 
-        # Periodic flush to DB
-        if len(all_rows) >= 1000:
+        if len(all_rows) > 500:
             upsert_vectors(conn, all_rows)
             all_rows.clear()
 
-    # Flush remaining
     if all_rows:
         upsert_vectors(conn, all_rows)
+
     conn.close()
 
-    # Report dim and count
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-    cur.execute("SELECT COUNT(*), MIN(dim), MAX(dim) FROM vectors")
-    count, mind, maxd = cur.fetchone()
-    conn.close()
-
-    dim_info = mind if mind == maxd else f"{mind}..{maxd}"
-    print(f"✅ Saved/updated embeddings in {DB_PATH} (count={count}, dim={dim_info})")
-
-    # ----------------------------------------------------
-    # Optional FAISS index
-    # ----------------------------------------------------
-    if USE_FAISS:
-        conn = sqlite3.connect(DB_PATH)
-        cur = conn.cursor()
-        cur.execute("SELECT uid, dim, vector FROM vectors")
-        rows = cur.fetchall()
-        conn.close()
-
-        if not rows:
-            print("ℹ️  No vectors present; skipping FAISS.")
-        else:
-            dim = rows[0][1]
-            index = faiss.IndexFlatL2(dim)
-            matrix = np.empty((len(rows), dim), dtype=np.float32)
-            ordered_uids = []
-            for i, (uid, _dim, blob) in enumerate(rows):
-                vec = np.frombuffer(blob, dtype=np.float32)
-                matrix[i, :] = vec
-                ordered_uids.append(uid)
-
-            # Ensure float32 + contiguous for FAISS and silence Pylance warning
-            matrix = np.ascontiguousarray(matrix, dtype=np.float32)
-            index.add(matrix)  # type: ignore[arg-type]
-
-            faiss.write_index(index, FAISS_INDEX_PATH)
-            with open(FAISS_UIDS_PATH, "w", encoding="utf-8") as f:
-                json.dump(ordered_uids, f)
-            print(
-                f"📦 Saved FAISS index to {FAISS_INDEX_PATH} and UID map to {FAISS_UIDS_PATH}"
-            )
-
-    print("🎉 Embedding generation complete.")
+    print("✔ Embeddings updated.")
 
 
 if __name__ == "__main__":
