@@ -27,6 +27,32 @@ from openai import AzureOpenAI
 # ============================================================
 st.set_page_config(page_title="Endo PoC — RAG Panel", layout="wide")
 
+# ============================================================
+# Simple Streamlit Password Gate
+# ============================================================
+
+load_dotenv()
+
+APP_PASSWORD = os.getenv("APP_PASSWORD")
+
+if "authenticated" not in st.session_state:
+    st.session_state["authenticated"] = False
+
+# Password prompt
+if not st.session_state["authenticated"]:
+    st.title("🔒 Endo Ecosystem Login")
+
+    pw = st.text_input("Enter password:", type="password")
+
+    if pw:
+        if pw == APP_PASSWORD:
+            st.session_state["authenticated"] = True
+            st.rerun()
+        else:
+            st.error("❌ Incorrect password")
+
+    st.stop()  # Stop the app until auth is successful
+
 
 # ============================================================
 # Paths / Environment
