@@ -22,6 +22,16 @@ import streamlit as st
 from dotenv import load_dotenv
 from openai import AzureOpenAI
 
+
+st.subheader("📌 DEBUG: Path Check (TEMPORARY)")
+st.code(
+    f"""
+cwd = {os.getcwd()}
+file = {__file__}
+repo_root = {Path(__file__).resolve().parents[2]}
+"""
+)
+
 # ============================================================
 # Streamlit CONFIG (MUST be first Streamlit call)
 # ============================================================
@@ -33,25 +43,12 @@ st.set_page_config(page_title="Endo PoC — RAG Panel", layout="wide")
 
 load_dotenv()
 
-APP_PASSWORD = os.getenv("APP_PASSWORD")
+APP_PASSWORD = st.secrets.get("APP_PASSWORD")
 
-if "authenticated" not in st.session_state:
-    st.session_state["authenticated"] = False
+entered_pw = st.text_input("Enter access password", type="password")
 
-# Password prompt
-if not st.session_state["authenticated"]:
-    st.title("🔒 Endo Ecosystem Login")
-
-    pw = st.text_input("Enter password:", type="password")
-
-    if pw:
-        if pw == APP_PASSWORD:
-            st.session_state["authenticated"] = True
-            st.rerun()
-        else:
-            st.error("❌ Incorrect password")
-
-    st.stop()  # Stop the app until auth is successful
+if APP_PASSWORD and entered_pw != APP_PASSWORD:
+    st.stop()
 
 
 # ============================================================
@@ -116,15 +113,29 @@ FAISS_INDEX_PATH = os.getenv("FAISS_INDEX_PATH", "./data/vector_store.faiss")
 FAISS_UIDS_PATH = os.getenv("FAISS_UIDS_PATH", "./data/vector_store.uids.json")
 
 # Azure OpenAI
-EMBED_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT", "")
-EMBED_KEY = os.getenv("AZURE_OPENAI_API_KEY", "")
-EMBED_DEPLOYMENT = os.getenv("AZURE_OPENAI_EMBED_DEPLOYMENT", "text-embedding-3-large")
+EMBED_ENDPOINT = st.secrets.get(
+    "AZURE_OPENAI_ENDPOINT", os.getenv("AZURE_OPENAI_ENDPOINT", "")
+)
+EMBED_KEY = st.secrets.get(
+    "AZURE_OPENAI_API_KEY", os.getenv("AZURE_OPENAI_API_KEY", "")
+)
 
-CHAT_ENDPOINT = os.getenv("AZURE_OPENAI_CHAT_ENDPOINT") or EMBED_ENDPOINT
-CHAT_KEY = os.getenv("AZURE_OPENAI_CHAT_API_KEY") or EMBED_KEY
+EMBED_DEPLOYMENT = st.secrets.get(
+    "AZURE_OPENAI_EMBED_DEPLOYMENT",
+    os.getenv("AZURE_OPENAI_EMBED_DEPLOYMENT", "text-embedding-3-large"),
+)
 
-CHAT_DEPLOYMENT_4O = os.getenv("AZURE_OPENAI_CHAT_DEPLOYMENT_4O", "gpt-4o-mini")
-CHAT_DEPLOYMENT_5 = os.getenv("AZURE_OPENAI_CHAT_DEPLOYMENT_5", "gpt-5.1-chat")
+CHAT_ENDPOINT = st.secrets.get("AZURE_OPENAI_CHAT_ENDPOINT", EMBED_ENDPOINT)
+CHAT_KEY = st.secrets.get("AZURE_OPENAI_CHAT_API_KEY", EMBED_KEY)
+
+CHAT_DEPLOYMENT_4O = st.secrets.get(
+    "AZURE_OPENAI_CHAT_DEPLOYMENT_4O",
+    os.getenv("AZURE_OPENAI_CHAT_DEPLOYMENT_4O", "gpt-4o-mini"),
+)
+CHAT_DEPLOYMENT_5 = st.secrets.get(
+    "AZURE_OPENAI_CHAT_DEPLOYMENT_5",
+    os.getenv("AZURE_OPENAI_CHAT_DEPLOYMENT_5", "gpt-5.1-chat"),
+)
 
 TEXT_CHAR_LIMIT = int(os.getenv("RAG_TEXT_CHAR_LIMIT", "8000"))
 SNIPPET_CHAR_LIMIT = int(os.getenv("RAG_SNIPPET_CHAR_LIMIT", "1200"))
