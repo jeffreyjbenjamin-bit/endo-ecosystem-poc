@@ -1,0 +1,29 @@
+credentials:
+  usernames:
+    jeff:
+      email: jeffrey.benjamin@boldwavepro.com
+      name: Jeff Benjamin
+      password: "$2b$12$1c/T2KU6.1efxvay9ngIcudW.K2hzr8DNjaOYimJwrLdpQdw47DXG"
+    peg:
+      email: pegcn@boldwavepro.com
+      name: Peg Crowley-Nowick
+      password: "$2b$12$1c/T2KU6.1efxvay9ngIcudW.K2hzr8DNjaOYimJwrLdpQdw47DXG"
+    karen:
+      email: tountaskh@gmail.com
+      name: Karen Tountas
+      password: "$2b$12$1c/T2KU6.1efxvay9ngIcudW.K2hzr8DNjaOYimJwrLdpQdw47DXG"
+    matt:
+      email: Matthew.Nowick@boldwavepro.com
+      name: Matthew Nowick
+      password: "$2b$12$1c/T2KU6.1efxvay9ngIcudW.K2hzr8DNjaOYimJwrLdpQdw47DXG"
+cookie:
+  name: endo_poc_auth
+  key: supersecret_secret_key_123
+  expiry_days: 7
+
+permissions:
+  admins:
+    - jeff
+    - peg
+    - karen
+    - matt
