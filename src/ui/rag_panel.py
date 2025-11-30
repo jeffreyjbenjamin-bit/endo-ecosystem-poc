@@ -271,7 +271,7 @@ with st.sidebar:
     st.markdown("---")
     st.subheader("🔄 Dataset Controls")
 
-    if st.button("Update Dataset"):
+    if st.button("🔄 Update Dataset (local only)", disabled=True):
         st.write("Updating…")
         progress = st.progress(0)
         out = st.empty()
