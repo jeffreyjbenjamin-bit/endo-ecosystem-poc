@@ -10,7 +10,7 @@ BIORXIV_FEEDS: List[str] = ["https://connect.biorxiv.org/biorxiv_xml.php?subject
 MEDRXIV_FEEDS: List[str] = ["https://connect.biorxiv.org/biorxiv_xml.php?subject=all"]
 
 # PoC keyword filter: set to None/empty to disable filtering
-KEYWORDS: Optional[set[str]] = None  # e.g., {"endometriosis", "adenomyosis"}
+KEYWORDS: Optional[set[str]] = {"endometriosis", "adenomyosis"}
 
 
 def _date_from_struct(t: Optional[struct_time]) -> Optional[str]:

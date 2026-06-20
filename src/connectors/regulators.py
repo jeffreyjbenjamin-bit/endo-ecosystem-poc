@@ -15,7 +15,7 @@ FDA_FEEDS: List[str] = [
     "https://www.fda.gov/about-fda/contact-fda/stay-informed/rss-feeds/medwatch/rss.xml",
 ]
 
-KEYWORDS: Optional[set[str]] = None  # keep disabled for PoC
+KEYWORDS: Optional[set[str]] = {"endometriosis", "adenomyosis"}
 
 
 def _date_from_struct(t: Optional[struct_time]) -> Optional[str]:

@@ -7,7 +7,12 @@ from typing import List, Dict, Any
 import requests
 
 # Base E-utilities endpoint (override via .env if desired)
-BASE = os.getenv("PUBMED_EUTILS_BASE", "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/")
+BASE = (
+    os.getenv(
+        "PUBMED_EUTILS_BASE", "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/"
+    ).rstrip("/")
+    + "/"
+)
 ESEARCH = f"{BASE}esearch.fcgi"
 ESUMMARY = f"{BASE}esummary.fcgi"
 
