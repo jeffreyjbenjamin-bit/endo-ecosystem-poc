@@ -17,3 +17,4 @@
 2026-06-20T17:07:00.288811	Processed=2994	Sources={'pubmed': 9500, 'ctgov': 9500, 'openalex': 1450, 'nih_reporter': 2900, 'ema': 451, 'fda': 1160, 'biorxiv': 870, 'medrxiv': 870, 'web_search': 0, 'semantic_scholar': 480, 'crossref': 960}
 2026-06-20T17:47:54.307541	Processed=2994	Sources={'pubmed': 10000, 'ctgov': 10000, 'openalex': 1500, 'nih_reporter': 3000, 'ema': 451, 'fda': 1160, 'biorxiv': 870, 'medrxiv': 870, 'web_search': 0, 'semantic_scholar': 480, 'crossref': 1000}
 2026-06-20T18:18:01.592864	Processed=2998	Sources={'pubmed': 10500, 'ctgov': 10500, 'openalex': 1550, 'nih_reporter': 3100, 'ema': 451, 'fda': 1160, 'biorxiv': 870, 'medrxiv': 870, 'web_search': 0, 'semantic_scholar': 510, 'crossref': 1040}
+2026-06-21T10:07:04.036636	Processed=2998	Sources={'pubmed': 11000, 'ctgov': 11000, 'openalex': 1600, 'nih_reporter': 3200, 'ema': 451, 'fda': 1160, 'biorxiv': 870, 'medrxiv': 870, 'web_search': 0, 'semantic_scholar': 510, 'crossref': 1080}
