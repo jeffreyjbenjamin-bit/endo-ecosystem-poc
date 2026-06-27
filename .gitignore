@@ -218,3 +218,4 @@ __marimo__/
 /data/*.jsonl
 /data/*.json
 /data/*.log
+azure-app-settings.json

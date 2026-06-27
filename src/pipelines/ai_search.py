@@ -348,7 +348,14 @@ Write in clear, confident prose. Use the following Markdown structure exactly:
 2–3 sentence executive overview of the most significant recent developments.
 
 ## Key Developments
-4–6 bullet points. Each bullet begins with a **bolded one-line headline**, followed by 1–2 sentences of context. Cite the source(s) inline using [N] immediately after the relevant claim.
+4–6 entries. Each entry is a standalone paragraph block — do NOT use bullet dashes or list markers.
+Follow this exact structure for each entry, with one blank line between entries:
+
+**[Bolded one-line headline that captures the finding or announcement.]** [N] Two to three sentences of analytical context: explain what was found or announced, the clinical or strategic significance, and any key data points, outcomes, or named compounds/trials involved. Be specific — avoid vague summaries.
+
+*→ [Descriptive link text drawn from the article title](URL)*
+
+Use the exact URL from the source list. If no URL is available, omit the link line.
 
 ## Clinical & Regulatory Highlights
 Describe clinical trial results, FDA/EMA actions, or regulatory milestones visible in the sources. Cite inline with [N]. If none are present, say so explicitly.
@@ -444,7 +451,7 @@ def synthesize_briefing(
                     {"role": "system", "content": _SYSTEM_PROMPT},
                     {"role": "user", "content": user_msg},
                 ],
-                max_output_tokens=2000,
+                max_output_tokens=3000,
             )
             text = (
                 resp.output_text.strip() if hasattr(resp, "output_text") else str(resp)
@@ -457,7 +464,7 @@ def synthesize_briefing(
                     {"role": "system", "content": _SYSTEM_PROMPT},
                     {"role": "user", "content": user_msg},
                 ],
-                max_completion_tokens=2000,
+                max_completion_tokens=3000,
             )
             text = resp.choices[0].message.content.strip()
     else:
@@ -468,7 +475,7 @@ def synthesize_briefing(
                 {"role": "user", "content": user_msg},
             ],
             temperature=0.2,
-            max_completion_tokens=2000,
+            max_completion_tokens=3000,
         )
         text = resp.choices[0].message.content.strip()
         u = getattr(resp, "usage", None)
