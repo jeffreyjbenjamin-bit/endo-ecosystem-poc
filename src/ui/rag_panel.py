@@ -3613,7 +3613,7 @@ with tab_search:
                 _date_range = st.select_slider(
                     "Date range",
                     options=[7, 14, 30, 60, 90, 180],
-                    value=90,
+                    value=7,
                     format_func=lambda d: f"{d} days",
                     key="ai_date_range",
                 )
@@ -3622,6 +3622,9 @@ with tab_search:
                     {
                         "Clinical Trials",
                         "Treatments & Drug Pipeline",
+                        "Diagnostics",
+                        "Therapeutics",
+                        "Epidemiology",
                         "Basic Research",
                         "Regulatory & Policy",
                         "Surgery",

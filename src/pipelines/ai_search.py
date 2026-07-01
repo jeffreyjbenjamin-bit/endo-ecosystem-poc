@@ -129,9 +129,26 @@ _CATEGORY_TEMPLATES: Dict[str, List[str]] = {
         "{topic} hormonal therapy GnRH antagonist {year}",
         "{topic} drug pipeline FDA {year}",
     ],
+    "Diagnostics": [
+        "{topic} diagnostic biomarker {year}",
+        "{topic} non-invasive early detection test {year}",
+        "{topic} imaging diagnostic tool approval {year}",
+        "{topic} blood test serum marker diagnosis {year}",
+    ],
+    "Therapeutics": [
+        "{topic} novel therapeutic target {year}",
+        "{topic} hormonal non-hormonal therapy {year}",
+        "{topic} immunotherapy anti-inflammatory treatment {year}",
+        "{topic} pain management excision ablation outcomes {year}",
+    ],
+    "Epidemiology": [
+        "{topic} prevalence incidence epidemiology {year}",
+        "{topic} risk factors comorbidities population {year}",
+        "{topic} diagnosis delay time to diagnosis {year}",
+        "{topic} economic burden healthcare utilization {year}",
+    ],
     "Basic Research": [
         "{topic} pathogenesis mechanism research {year}",
-        "{topic} biomarker diagnosis {year}",
         "{topic} genetics epigenetics {year}",
     ],
     "Regulatory & Policy": [
@@ -360,6 +377,15 @@ Use the exact URL from the source list. If no URL is available, omit the link li
 ## Clinical & Regulatory Highlights
 Describe clinical trial results, FDA/EMA actions, or regulatory milestones visible in the sources. Cite inline with [N]. If none are present, say so explicitly.
 
+## Diagnostics
+Summarize advances in biomarkers, imaging, and non-invasive or early-detection methods visible in the sources. Include diagnostic tool approvals, CE marks, FDA clearances, or pipeline items where present. Cite inline with [N]. If no diagnostic developments are present, say so explicitly.
+
+## Therapeutics
+Summarize novel therapeutic approaches, targets, or treatment outcomes visible in the sources. Include hormonal, non-hormonal, immunological, and surgical modalities. Note stage of evidence (preclinical, Phase I/II/III, approved). Cite inline with [N]. If no therapeutic developments are present, say so explicitly.
+
+## Epidemiology
+Summarize findings on prevalence, incidence, diagnosis delay, risk factors, comorbidities, or healthcare burden visible in the sources. Highlight any population-level or demographic patterns. Cite inline with [N]. If no epidemiological findings are present, say so explicitly.
+
 ## Emerging Research Themes
 What patterns, mechanisms, or scientific directions appear across multiple sources? Cite inline with [N].
 
@@ -376,7 +402,12 @@ CITATION RULES:
 - Only cite sources from the numbered list provided. Do not invent or hallucinate sources.
 - If a source has no URL, omit the URL field in the References section.
 - If a date is unknown, write "date unknown" in the References section.
-- Do not list a source in References unless it was cited inline."""
+- Do not list a source in References unless it was cited inline.
+
+DATE RULES:
+- Where a source has a known publication date, include it inline immediately after the citation number in parentheses, e.g. [3] (June 28, 2025).
+- In the References section, always include the full date when known.
+- If most sources fall outside the 7-day window, note this explicitly in the Intelligence Summary."""
 
 
 def make_chat_client(deployment: str) -> AzureOpenAI:
