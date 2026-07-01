@@ -3862,19 +3862,12 @@ with tab_search:
                     f"{_result['n_raw']} raw &rarr; {_result['n_deduped']} unique &nbsp;·&nbsp; "
                     f"{_result['model']} &nbsp;·&nbsp; {_result['latency_ms']:,} ms"
                 )
-                st.markdown(
-                    f"""
-                    <div class="brief-panel">
-                      <div class="brief-panel-header">
-                        Intelligence Briefing
-                        <div class="brief-panel-run">{_run_meta}</div>
-                      </div>
-                      <div class="brief-panel-body">
-                    """,
-                    unsafe_allow_html=True,
+                _briefing_html = render_newsletter_html(
+                    title="Intelligence Briefing",
+                    meta=_run_meta,
+                    briefing_md=_result["briefing"],
                 )
-                st.markdown(_result["briefing"])
-                st.markdown("</div></div>", unsafe_allow_html=True)
+                _st_components.html(_briefing_html, height=900, scrolling=True)
 
                 # ── Email this briefing ──────────────────────────
                 with st.expander("Email this briefing", expanded=False):

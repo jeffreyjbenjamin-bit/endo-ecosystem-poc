@@ -116,6 +116,18 @@ def _md_inline(text: str) -> str:
     return text
 
 
+# Sections whose paragraph blocks get card treatment (same as Key Developments)
+_CARD_SECTIONS = {
+    "Key Developments",
+    "Diagnostics",
+    "Therapeutics",
+    "Epidemiology",
+    "Clinical & Regulatory Highlights",
+    "Emerging Research Themes",
+    "What to Watch",
+}
+
+
 def _markdown_to_html(md: str, ref_urls: Dict[int, str]) -> str:
     """
     Convert briefing Markdown to styled HTML blocks.
@@ -126,7 +138,8 @@ def _markdown_to_html(md: str, ref_urls: Dict[int, str]) -> str:
     lines = md.splitlines()
     out: List[str] = []
     i = 0
-    in_key_dev = False
+    in_key_dev = False  # accumulating paragraph blocks for card rendering
+    in_card_section = False  # a key-dev-section div is open
     in_list = False
     pending_block: List[str] = []
 
@@ -154,6 +167,16 @@ def _markdown_to_html(md: str, ref_urls: Dict[int, str]) -> str:
             + "</div>"
         )
 
+    def _close_card_section() -> None:
+        nonlocal in_key_dev, in_card_section, pending_block
+        if pending_block:
+            _flush_key_dev_block(pending_block)
+            pending_block = []
+        if in_card_section:
+            out.append("</div>")
+            in_card_section = False
+        in_key_dev = False
+
     def _close_list() -> None:
         nonlocal in_list
         if in_list:
@@ -166,10 +189,7 @@ def _markdown_to_html(md: str, ref_urls: Dict[int, str]) -> str:
         # Section headings
         if line.startswith("### "):
             _close_list()
-            if in_key_dev and pending_block:
-                _flush_key_dev_block(pending_block)
-                pending_block = []
-            in_key_dev = False
+            _close_card_section()
             text = _md_inline(line[4:])
             out.append(f"<h3>{text}</h3>")
             i += 1
@@ -177,24 +197,20 @@ def _markdown_to_html(md: str, ref_urls: Dict[int, str]) -> str:
 
         if line.startswith("## "):
             _close_list()
-            if in_key_dev and pending_block:
-                _flush_key_dev_block(pending_block)
-                pending_block = []
+            _close_card_section()
             section = line[3:].strip()
-            in_key_dev = section == "Key Developments"
             text = _md_inline(section)
             out.append(f"<h2>{text}</h2>")
-            if in_key_dev:
+            if section in _CARD_SECTIONS:
+                in_key_dev = True
+                in_card_section = True
                 out.append('<div class="key-dev-section">')
             i += 1
             continue
 
         if line.startswith("# "):
             _close_list()
-            if in_key_dev and pending_block:
-                _flush_key_dev_block(pending_block)
-                pending_block = []
-            in_key_dev = False
+            _close_card_section()
             text = _md_inline(line[2:])
             out.append(f"<h1>{text}</h1>")
             i += 1
@@ -203,15 +219,12 @@ def _markdown_to_html(md: str, ref_urls: Dict[int, str]) -> str:
         # Horizontal rule
         if re.match(r"^-{3,}$", line):
             _close_list()
-            if in_key_dev and pending_block:
-                _flush_key_dev_block(pending_block)
-                pending_block = []
-            in_key_dev = False
+            _close_card_section()
             out.append("<hr>")
             i += 1
             continue
 
-        # Blank line
+        # Blank line — flush pending card block but keep section open
         if not line.strip():
             _close_list()
             if in_key_dev and pending_block:
@@ -256,9 +269,7 @@ def _markdown_to_html(md: str, ref_urls: Dict[int, str]) -> str:
         i += 1
 
     _close_list()
-    if in_key_dev and pending_block:
-        _flush_key_dev_block(pending_block)
-        out.append("</div>")  # close key-dev-section
+    _close_card_section()
 
     return "\n".join(out)
 
