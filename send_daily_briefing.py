@@ -2,7 +2,7 @@
 send_daily_briefing.py — CLI script for automated daily briefing and newsletter dispatch.
 
 Run this from a system scheduler (Windows Task Scheduler or cron) at the time
-configured in the Newsletter Config tab.
+configured in the Report Config tab.
 
 Usage:
     python send_daily_briefing.py              # sends if within ±10 min of configured time

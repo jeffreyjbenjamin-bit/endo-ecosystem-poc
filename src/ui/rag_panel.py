@@ -969,14 +969,23 @@ def chat_answer(
 # ============================================================
 st.title("Evidence Gap")
 
-tab_search, tab_rag, tab_compare, tab_newsletter, tab_nl_config, tab_qa = st.tabs(
+(
+    tab_search,
+    tab_rag,
+    tab_compare,
+    tab_newsletter,
+    tab_nl_config,
+    tab_qa,
+    tab_nl_v2,
+) = st.tabs(
     [
         "🔍 AI Article Search & Summary",
         "📚 RAG Article Presentation",
         "⚖️ Output Comparison",
         "📰 Newsletter Builder",
-        "📧 Newsletter Config",
+        "📧 Report Config",
         "💬 Q & A",
+        "🆕 Newsletter Builder v2",
     ]
 )
 
@@ -2104,7 +2113,7 @@ Return only the JSON array, no other text."""
                     st.error("SMTP not configured.")
                 elif not _nl_recips_nl:
                     st.warning(
-                        "No recipients subscribed to Newsletter. Update subscriptions in Newsletter Config."
+                        "No recipients subscribed to Newsletter. Update subscriptions in Report Config."
                     )
                 else:
                     _qs_title = _nl_title or "Endometriosis Newsletter"
@@ -2697,13 +2706,13 @@ For each finding, write a standalone paragraph block — no bullet dashes. Follo
 
 
 # ============================================================
-# Tab: Newsletter Config
+# Tab: Report Config
 # ============================================================
 with tab_nl_config:
 
     st.markdown(
         "<div style='font-size:22px;font-weight:700;margin-bottom:4px'>"
-        "Newsletter Config</div>"
+        "Report Config</div>"
         "<div style='font-size:13px;color:#7f8c8d;margin-bottom:20px'>"
         "Manage the mailing list for the daily Intelligence Briefing and "
         "send test dispatches on demand.</div>",
@@ -4414,3 +4423,35 @@ with tab_rag:
                 if st.button("Next →", disabled=page >= max_page, key="rag_next"):
                     st.session_state["rag_page"] += 1
                     st.rerun()
+
+
+# ============================================================
+# Tab: Newsletter Builder v2 (seeded from a past Intelligence Briefing)
+# ============================================================
+with tab_nl_v2:
+    try:
+        from src.pipelines.ai_search import (
+            load_recent_runs as _nb2_load_ai,
+            AI_SEARCH_DB as _NB2_AI_DB,
+            CHAT_DEPLOYMENT_5 as _NB2_DEPLOY,
+            make_chat_client as _nb2_make_client,
+        )
+        from src.ui.newsletter_from_briefing import render_tab as _nb2_render
+
+        _nb2_render(
+            {
+                "load_ai_runs": lambda limit: _nb2_load_ai(_NB2_AI_DB, limit=limit),
+                "load_docs_df": load_docs_df,
+                "load_sqlite_vectors": load_sqlite_vectors,
+                "embed_text": embed_text,
+                "cosine_search": cosine_search,
+                "make_chat_client": _nb2_make_client,
+                "chat_deployment": _NB2_DEPLOY,
+                "save_newsletter": save_newsletter,
+                "update_newsletter": update_newsletter,
+                "render_newsletter_html": render_newsletter_html,
+                "html_component": _st_components.html,
+            }
+        )
+    except Exception as _nb2_err:
+        st.error(f"Newsletter Builder v2 failed to load: {_nb2_err}")

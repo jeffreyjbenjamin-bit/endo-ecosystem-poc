@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "streamlit",
+      "runtimeExecutable": ".venv/Scripts/python.exe",
+      "runtimeArgs": ["-m", "streamlit", "run", "src/ui/rag_panel.py", "--server.port", "8511", "--server.headless", "true"],
+      "port": 8511
+    }
+  ]
+}
