@@ -142,3 +142,31 @@ def test_preview_images():
     item = {"pagemap": {"cse_image": [{"src": "https://cdn/c.jpg"}]}}
     assert image_from_search_item(item) == "https://cdn/c.jpg"
     assert image_from_search_item({}) is None
+
+
+def test_development_cards_parse_both_link_styles():
+    from src.ui.home_tab import parse_development, parse_link_line, reference_urls
+
+    assert parse_link_line("*→ [Drug X results](https://a.com/x)*") == (
+        "Drug X results",
+        "https://a.com/x",
+    )
+    # model sometimes writes text(url), and URLs can contain parentheses
+    assert parse_link_line(
+        "*→ Angiogenesis study - The Lancet(https://l.com/PIIS3050-5038(26)00048-8/f)*"
+    ) == ("Angiogenesis study - The Lancet", "https://l.com/PIIS3050-5038(26)00048-8/f")
+
+    d = parse_development(
+        "**Drug X hits Phase 3 endpoint.** [1] Details here.\n\n"
+        "*→ [Drug X results](https://a.com/x)*"
+    )
+    assert d == {
+        "headline": "Drug X hits Phase 3 endpoint.",
+        "body": "Details here.",
+        "link_text": "Drug X results",
+        "url": "https://a.com/x",
+    }
+    # no link line: fall back to the first cited reference
+    refs = reference_urls(BRIEFING + "\n[2] B. https://b.com/t\n")
+    d = parse_development("**Blood test cleared.** [2] More.", refs)
+    assert d["url"] == "https://b.com/t"

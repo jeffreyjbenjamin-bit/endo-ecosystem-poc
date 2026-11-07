@@ -14,6 +14,13 @@ footer. Keep each version's changes in its own <ul> list. -->
 
 <tr><td>2026-11-07</td><td>
 
+<b>v1.13.0</b>
+<ul>
+<li>Home: Key Developments shown as cards in the briefing's style, with the article's image where the source provides one.</li>
+<li>Home: most recent clinical trials moved to the right-hand column under the newsletter, showing ID, Date and Title.</li>
+<li>Home: <b>Open latest Intelligence Briefing</b> and <b>Open latest newsletter</b> show the published version in a pop-up over the page; the newsletter pop-up has an Edit button.</li>
+</ul>
+
 <b>v1.12.0</b>
 <ul>
 <li>New <b>Home</b> tab (first tab), a summary of the whole app: the latest briefing's Intelligence Summary and Key Developments, an at-a-glance panel (latest briefing, open trials, latest newsletter with an Open button), recent search results as cards with preview images, and the 5 most recently posted clinical trials.</li>

@@ -15,6 +15,7 @@ from html import escape
 from typing import Any, Callable, Dict, List, Optional
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 _CSS = """
 <style>
@@ -49,7 +50,18 @@ _CSS = """
 .home-badge { display:inline-block; font-size:10px; font-weight:700; padding:1px 6px; border-radius:4px;
   background:#e8f1fb; color:#1a5c99; }
 .home-badge.press { background:#fde8f1; color:#9b1d5a; }
-.home-trials { width:100%; border-collapse:collapse; font-size:13px; }
+.home-trials { width:100%; border-collapse:collapse; font-size:12.5px; }
+.home-dev { display:flex; gap:14px; padding:14px 16px; margin-bottom:12px; background:#f8faff;
+  border:1px solid #e4e9f0; border-left:3px solid #1a7fb5; border-radius:4px; }
+.home-dev .dev-img { flex:0 0 150px; }
+.home-dev .dev-img img { width:150px; height:100px; object-fit:cover; border-radius:4px; display:block; }
+.home-dev .dev-text { flex:1; min-width:0; }
+.home-dev .dev-head { font-size:15px; font-weight:700; color:#0d2137; line-height:1.4; margin-bottom:4px; }
+.home-dev .dev-body { font-size:14px; line-height:1.65; color:#1a2535; }
+.home-dev .dev-src { font-size:12px; color:#7f8c8d; margin-top:6px; font-style:italic; }
+.home-dev .dev-src a { color:#1a7fb5; font-style:normal; }
+@media (max-width: 640px) { .home-dev { flex-direction:column; }
+  .home-dev .dev-img img { width:100%; height:160px; } }
 .home-trials th { text-align:left; color:#566573; font-weight:600; padding:6px 8px;
   border-bottom:2px solid #e3e6ea; white-space:nowrap; }
 .home-trials td { padding:7px 8px; border-bottom:1px solid #eef0f2; vertical-align:top; }
@@ -149,24 +161,154 @@ def _stat(label: str, value: str, detail: str = "") -> str:
 
 
 def _trials_table(trials: List[Dict[str, Any]]) -> str:
+    """Compact list for the right column: ID, Date (first posted), Title."""
     rows = []
     for t in trials:
         new = " <span class='home-chip new'>New</span>" if t.get("is_new") else ""
         rows.append(
             "<tr>"
-            f"<td><a href='{escape(t['url'], quote=True)}' target='_blank' rel='noopener'>"
-            f"<b>{escape(t['id'])}</b></a><div class='sub'>{escape(t.get('source', ''))}</div></td>"
+            f"<td><a href='{escape(t['url'], quote=True)}' target='_blank' "
+            f"rel='noopener'><b>{escape(t['id'])}</b></a></td>"
+            f"<td style='white-space:nowrap'>{escape(_fmt_date(t.get('first_posted')) or '—')}</td>"
             f"<td>{escape(t['title'])}{new}</td>"
-            f"<td>{escape(t['lead_sponsor'])}<div class='sub'>{escape(t['sponsor_type'])}</div></td>"
-            f"<td>{escape(t['study_phase'])}</td>"
-            f"<td>{escape(t['status'])}</td>"
-            f"<td style='white-space:nowrap'>{escape(_fmt_date(t.get('first_posted')))}</td>"
             "</tr>"
         )
     return (
-        "<table class='home-trials'><thead><tr><th>ID</th><th>Title</th><th>Lead Sponsor</th>"
-        "<th>Study / Phase</th><th>Status</th><th>First Posted</th></tr></thead>"
-        f"<tbody>{''.join(rows)}</tbody></table>"
+        "<table class='home-trials'><thead><tr><th>ID</th><th>Date</th><th>Title</th>"
+        f"</tr></thead><tbody>{''.join(rows)}</tbody></table>"
+    )
+
+
+_LINK_RE = re.compile(r"\[([^\]]+)\]\((https?://[^)\s]+)\)")
+
+
+def reference_urls(md: str) -> Dict[int, str]:
+    """{N: url} from a briefing's References section."""
+    refs = split_sections(md).get("References", "")
+    out: Dict[int, str] = {}
+    for m in re.finditer(r"^\s*\[(\d+)\].*?(https?://\S+)", refs, re.M):
+        out[int(m.group(1))] = m.group(2).rstrip(").,")
+    return out
+
+
+def parse_link_line(line: str) -> tuple:
+    """(text, url) from a '*→ ...*' line.
+
+    Handles '[text](url)' and the 'text(url)' form the model sometimes writes,
+    including URLs that contain parentheses.
+    """
+    s = line.strip().strip("*_ ").lstrip("→").strip().rstrip("*_ ")
+    i = s.find("http")
+    if i < 0:
+        return s, ""
+    url = s[i:].split()[0]
+    while url.endswith(")") and url.count(")") > url.count("("):
+        url = url[:-1]
+    text = s[:i].rstrip("(").rstrip().rstrip("]").lstrip("[").strip()
+    return text, url
+
+
+def parse_development(
+    block: str, refs: Optional[Dict[int, str]] = None
+) -> Dict[str, str]:
+    """Split a Key Developments entry into headline, body, link text and URL.
+
+    The URL is the entry's "→ link" line, or else the first cited reference.
+    """
+    link_text, url = "", ""
+    lines = block.splitlines()
+    body_lines = []
+    for line in lines:
+        if line.strip().lstrip("*_ ").startswith("→"):
+            link_text, url = parse_link_line(line)
+        else:
+            body_lines.append(line)
+    body = " ".join(" ".join(body_lines).split())
+    if not url and refs:
+        cite = re.search(r"\[(\d+)\]", body)
+        if cite:
+            url = refs.get(int(cite.group(1)), "")
+    m = re.match(r"\*\*(.+?)\*\*\s*(.*)", body)
+    headline, rest = (m.group(1), m.group(2)) if m else ("", body)
+    return {
+        "headline": strip_citations(headline).strip(),
+        "body": strip_citations(rest).strip(),
+        "link_text": link_text.strip(),
+        "url": url,
+    }
+
+
+def _inline(text: str) -> str:
+    """Escape, then allow **bold**, *italic* and [text](url) links."""
+    html = escape(text)
+    html = _LINK_RE.sub(
+        lambda m: f"<a href='{m.group(2)}' target='_blank' rel='noopener'>{m.group(1)}</a>",
+        html,
+    )
+    html = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", html)
+    return re.sub(r"(?<!\w)\*(.+?)\*(?!\w)", r"<em>\1</em>", html)
+
+
+def _dev_card(d: Dict[str, str], image: str) -> str:
+    """A Key Developments card in the briefing's style, with the article image."""
+    url = escape(d["url"], quote=True)
+    img = ""
+    if image:
+        img = (
+            f"<a class='dev-img' href='{url}' target='_blank' rel='noopener'>"
+            f"<img src='{escape(image, quote=True)}' alt='' loading='lazy' "
+            "referrerpolicy='no-referrer' onerror=\"this.closest('.dev-img').remove()\">"
+            "</a>"
+        )
+    head = (
+        f"<div class='dev-head'>{_inline(d['headline'])}</div>" if d["headline"] else ""
+    )
+    src = ""
+    if d["url"]:
+        label = _inline(d["link_text"]) if d["link_text"] else "Read the source"
+        src = (
+            f"<div class='dev-src'>→ <a href='{url}' target='_blank' rel='noopener'>"
+            f"{label}</a></div>"
+        )
+    return (
+        f"<div class='home-dev'>{img}<div class='dev-text'>{head}"
+        f"<div class='dev-body'>{_inline(d['body'])}</div>{src}</div></div>"
+    )
+
+
+def _briefing_html(md: str, title: str, meta: str) -> str:
+    from src.common.email_briefing import render_newsletter_html
+
+    return render_newsletter_html(title=title, meta=meta, briefing_md=md)
+
+
+@st.dialog("Latest Intelligence Briefing", width="large")
+def _briefing_dialog(run: Dict[str, Any]) -> None:
+    meta = (
+        f"Run #{run['id']} · {_fmt_date(run.get('run_ts'))} · "
+        f"{run.get('n_scored') or 0} sources"
+    )
+    components.html(
+        _briefing_html(run.get("briefing_text") or "", "Intelligence Briefing", meta),
+        height=720,
+        scrolling=True,
+    )
+
+
+@st.dialog("Latest newsletter", width="large")
+def _newsletter_dialog(nl: Dict[str, Any], open_editor: Callable) -> None:
+    title = nl.get("title") or "Endometriosis Newsletter"
+    meta = "Newsletter · " + _fmt_date(nl.get("updated_ts") or nl.get("created_ts"))
+    components.html(
+        _briefing_html(nl.get("content_md") or "", title, meta),
+        height=680,
+        scrolling=True,
+    )
+    st.button(
+        "✏️ Edit this newsletter",
+        key="home_nl_edit",
+        on_click=open_editor,
+        args=(nl["id"],),
     )
 
 
@@ -263,7 +405,8 @@ def render_tab(deps: Dict[str, Any]) -> None:
                 "No Intelligence Briefing yet. Run one in **Build Intelligence Briefing**."
             )
         else:
-            sections = split_sections(latest.get("briefing_text") or "")
+            text = latest.get("briefing_text") or ""
+            sections = split_sections(text)
             summary = sections.get("Intelligence Summary", "")
             with st.container(border=True, key="home_summary"):
                 st.markdown(
@@ -278,14 +421,27 @@ def render_tab(deps: Dict[str, Any]) -> None:
                     ),
                     unsafe_allow_html=True,
                 )
-            devs = key_development_blocks(sections.get("Key Developments", ""))
+            devs = [
+                parse_development(b, reference_urls(text))
+                for b in key_development_blocks(sections.get("Key Developments", ""))
+            ]
             if devs:
                 st.markdown(
                     "<div class='home-h'>Key Developments</div>", unsafe_allow_html=True
                 )
-                for b in devs:
-                    with st.container(border=True):
-                        st.markdown(strip_citations(b))
+                known = {
+                    s.get("url"): s.get("image")
+                    for s in deps["sources_of"](latest)
+                    if s.get("image")
+                }
+                need = tuple(
+                    d["url"] for d in devs if d["url"] and d["url"] not in known
+                )
+                imgs = {**(_images(need) if need else {}), **known}
+                st.markdown(
+                    "".join(_dev_card(d, imgs.get(d["url"], "")) for d in devs),
+                    unsafe_allow_html=True,
+                )
 
     trials_data = load_trials() or {}
     trials = trials_data.get("trials") or []
@@ -302,20 +458,12 @@ def render_tab(deps: Dict[str, Any]) -> None:
                 ),
                 unsafe_allow_html=True,
             )
-        n_new = sum(1 for t in trials if t.get("is_new"))
-        n_co = sum(1 for t in trials if t.get("is_company"))
-        st.markdown(
-            _stat(
-                "Open US clinical trials",
-                str(len(trials)) if trials else "—",
-                (
-                    f"{n_new} new · {n_co} company-sponsored"
-                    if trials
-                    else "Refresh the Clinical Trials tab to load"
-                ),
-            ),
-            unsafe_allow_html=True,
-        )
+            if st.button(
+                "📰 Open latest Intelligence Briefing",
+                key="home_open_brief",
+                use_container_width=True,
+            ):
+                _briefing_dialog(latest)
         nls = deps["load_newsletters"](1)
         if nls:
             nl = nls[0]
@@ -327,12 +475,40 @@ def render_tab(deps: Dict[str, Any]) -> None:
                 ),
                 unsafe_allow_html=True,
             )
-            st.button(
+            if st.button(
                 "📝 Open latest newsletter",
                 key="home_open_nl",
-                on_click=deps["open_newsletter"],
-                args=(nl["id"],),
                 use_container_width=True,
+            ):
+                _newsletter_dialog(nl, deps["open_newsletter"])
+
+        n_new = sum(1 for t in trials if t.get("is_new"))
+        n_co = sum(1 for t in trials if t.get("is_company"))
+        st.markdown(
+            _stat(
+                "Open US clinical trials",
+                str(len(trials)) if trials else "—",
+                (
+                    f"{n_new} new · {n_co} company-sponsored"
+                    if trials
+                    else "They load automatically each day"
+                ),
+            ),
+            unsafe_allow_html=True,
+        )
+        if trials:
+            newest = sorted(
+                trials,
+                key=lambda t: (t.get("first_posted") or "", t["id"]),
+                reverse=True,
+            )[:5]
+            st.markdown(
+                "<div class='home-h' style='font-size:15px;margin-top:6px'>"
+                "Most recent clinical trials</div>" + _trials_table(newest),
+                unsafe_allow_html=True,
+            )
+            st.caption(
+                "Most recently posted · all trials are in the Clinical Trials tab."
             )
 
     # ── AI trends ────────────────────────────────────────────────
@@ -352,20 +528,3 @@ def render_tab(deps: Dict[str, Any]) -> None:
             for col, s in zip(cols, results[row_start : row_start + 3]):
                 img = s.get("image") or imgs.get(s.get("url", ""), "")
                 col.markdown(_result_card(s, img), unsafe_allow_html=True)
-
-    # ── Most recent clinical trials ─────────────────────────────
-    st.markdown(
-        "<div class='home-h' style='margin-top:10px'>Most recent clinical trials</div>",
-        unsafe_allow_html=True,
-    )
-    if not trials:
-        st.caption("No trials loaded yet. They load automatically each day.")
-    else:
-        newest = sorted(
-            trials, key=lambda t: (t.get("first_posted") or "", t["id"]), reverse=True
-        )[:5]
-        st.markdown(_trials_table(newest), unsafe_allow_html=True)
-        st.caption(
-            f"The 5 most recently posted of {len(trials)} open endometriosis trials "
-            "with a US site. See all in the Clinical Trials tab."
-        )
