@@ -1041,7 +1041,45 @@ if editor_requested():
     render_editor_page(_nb2_deps())
     st.stop()
 
-st.title("Evidence Gap")
+# Report Config opens from the ⚙️ button in the top banner (?view=config) instead of
+# a tab. The page layout is the same in both views and CSS hides one or the other,
+# so the tabs keep their selections and active tab while Report Config is open.
+_CONFIG_VIEW = st.query_params.get("view") == "config"
+
+
+def _open_config() -> None:
+    st.query_params["view"] = "config"
+    st.session_state["config_scroll_top"] = True
+
+
+def _close_config() -> None:
+    st.query_params.pop("view", None)
+
+
+with st.container(
+    horizontal=True, vertical_alignment="center", horizontal_alignment="distribute"
+):
+    st.title("Evidence Gap")
+    if _CONFIG_VIEW:
+        st.button("← Back", key="config_back", on_click=_close_config)
+    else:
+        st.button(
+            "⚙️",
+            key="config_open",
+            help="Report Config: mailing list, daily send time and email settings",
+            on_click=_open_config,
+        )
+st.markdown(
+    "<style>"
+    + (
+        ".st-key-main_tabs{display:none}"
+        if _CONFIG_VIEW
+        else ".st-key-report_config{display:none}"
+    )
+    + ".st-key-config_open button{font-size:1.35rem;padding:0.15rem 0.6rem;}"
+    "</style>",
+    unsafe_allow_html=True,
+)
 
 TAB_BRIEFING = "🔍 Build Intelligence Briefing"
 TAB_NL_FROM_BRIEF = "🗞️ Build Newsletter from Intel Briefing"
@@ -1056,14 +1094,18 @@ _tab_labels = [TAB_BRIEFING, TAB_NL_FROM_BRIEF]
 if SHOW_LEGACY_TABS:
     _tab_labels += ["📚 RAG Article Presentation", "📰 Newsletter Builder"]
 TAB_TRIALS = "🧪 Clinical Trials"
-_tab_labels += [TAB_TRIALS, "📧 Report Config"]
-_tabs = st.tabs(
-    _tab_labels,
-    # Returning from the newsletter editing page lands back on its tab
-    default=TAB_NL_FROM_BRIEF if st.session_state.pop("return_to_nb2", False) else None,
-)
+_tab_labels.append(TAB_TRIALS)
+with st.container(key="main_tabs"):
+    _tabs = st.tabs(
+        _tab_labels,
+        # Returning from the newsletter editing page lands back on its tab
+        default=(
+            TAB_NL_FROM_BRIEF if st.session_state.pop("return_to_nb2", False) else None
+        ),
+    )
+tab_nl_config = st.container(key="report_config")
 tab_search, tab_nl_v2 = _tabs[0], _tabs[1]
-tab_trials, tab_nl_config = _tabs[-2], _tabs[-1]
+tab_trials = _tabs[-1]
 tab_rag, tab_newsletter = (_tabs[2], _tabs[3]) if SHOW_LEGACY_TABS else (None, None)
 
 # Sidebar: model selector + disabled dataset updater + new chat
@@ -2285,6 +2327,16 @@ with tab_trials:
 # Tab: Report Config
 # ============================================================
 with tab_nl_config:
+    if _CONFIG_VIEW and st.session_state.pop("config_scroll_top", False):
+        # Open Report Config at the top, not at the tab page's scroll position.
+        # Drawn inside this container so the tabs' layout position never changes.
+        _st_components.html(
+            "<script>const d=window.parent.document;"
+            "const toTop=()=>(d.querySelector('[data-testid=\"stMain\"]')"
+            "||d.scrollingElement).scrollTo(0,0);"
+            "[0,150,400,800].forEach(t=>setTimeout(toTop,t));</script>",
+            height=0,
+        )
 
     st.markdown(
         "<div style='font-size:22px;font-weight:700;margin-bottom:4px'>"
@@ -3199,6 +3251,17 @@ with tab_search:
                         "and that the deployment name is correct."
                     )
                     st.stop()
+
+                # New Clinical Trials section (trials not yet in an emailed briefing)
+                try:
+                    from src.pipelines.clinical_trials import (
+                        add_trials_to_briefing,
+                        unbriefed_trials,
+                    )
+
+                    _briefing = add_trials_to_briefing(_briefing, unbriefed_trials())
+                except Exception:
+                    pass
 
                 _pbar.progress(95, text="Saving run…")
                 _run_id = save_ai_search_run(

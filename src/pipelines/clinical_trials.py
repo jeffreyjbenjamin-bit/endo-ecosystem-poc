@@ -3,6 +3,12 @@
 The Clinical Trials tab calls :func:`refresh_trials` (Refresh button) and
 :func:`load_trials` (on every page load). Results are cached as JSON in the app
 state directory so the table survives restarts without hitting the API.
+
+scheduler.py refreshes the list once a day. Trials that appear after the first
+search are "new": every Intelligence Briefing gets a New Clinical Trials section
+for them until a daily email has carried them (:func:`mark_briefed`). Trials
+flagged "Include in newsletter" are offered in Build Newsletter from Intel
+Briefing.
 """
 
 from __future__ import annotations
@@ -28,6 +34,7 @@ US = "United States"
 _FIELDS = "|".join(
     [
         "IdentificationModule",
+        "DescriptionModule",
         "StatusModule",
         "SponsorCollaboratorsModule",
         "DesignModule",
@@ -166,6 +173,10 @@ def parse_study(study: dict) -> dict:
         "confirmed_dx": phrase is not None,
         "confirmed_dx_phrase": phrase or "",
         "last_update": (stat.get("lastUpdatePostDateStruct") or {}).get("date", ""),
+        "first_posted": (stat.get("studyFirstPostDateStruct") or {}).get("date", ""),
+        "summary": " ".join(
+            (sec.get("descriptionModule", {}).get("briefSummary") or "").split()
+        )[:1500],
     }
 
 
@@ -198,26 +209,259 @@ def fetch_open_us_trials(
     return trials
 
 
-def refresh_trials() -> dict:
-    """Run the search, cache it, and return {"refreshed_at", "trials"}."""
-    payload = {
-        "refreshed_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "source": SOURCE_NAME,
-        "trials": fetch_open_us_trials(),
-    }
-    path = Path(state_path(CACHE_FILE))
+# ── Cache ─────────────────────────────────────────────────────────────────────
+# clinical_trials.json holds:
+#   refreshed_at    last successful search (UTC ISO)
+#   trials          the current open trials (parse_study rows)
+#   history         {nct: {"first_seen", "baseline", "briefed"}} for every trial
+#                   ever listed, so a trial is announced as new only once
+#   newsletter_ids  trials flagged "Include in newsletter"
+
+NEW_BADGE_DAYS = 14
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def _cache_path() -> Path:
+    return Path(state_path(CACHE_FILE))
+
+
+def _save(payload: dict) -> None:
+    path = _cache_path()
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(payload, indent=1), encoding="utf-8")
     tmp.replace(path)
-    return payload
 
 
 def load_trials() -> dict | None:
     """The last cached search, or None if Refresh has never run."""
     try:
-        return json.loads(Path(state_path(CACHE_FILE)).read_text(encoding="utf-8"))
+        data = json.loads(_cache_path().read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
+    data.setdefault("history", {})
+    data.setdefault("newsletter_ids", [])
+    _annotate(data)
+    return data
+
+
+def _annotate(data: dict) -> None:
+    """Add is_new / in_newsletter to each trial row (not saved)."""
+    hist = data.get("history") or {}
+    nl = set(data.get("newsletter_ids") or [])
+    cutoff = datetime.now(timezone.utc).timestamp() - NEW_BADGE_DAYS * 86400
+    for t in data.get("trials") or []:
+        h = hist.get(t["id"]) or {}
+        first = h.get("first_seen") or ""
+        t["first_seen"] = first
+        try:
+            recent = datetime.fromisoformat(first).timestamp() >= cutoff
+        except ValueError:
+            recent = False
+        t["is_new"] = bool(h) and not h.get("baseline") and recent
+        t["in_newsletter"] = t["id"] in nl
+
+
+def merge_refresh(old: dict | None, trials: list[dict], now: str) -> dict:
+    """Combine a fresh search with the previous cache.
+
+    The first search ever is the baseline: those trials are not "new". After
+    that, a trial not seen before gets first_seen=now and briefed=False until a
+    briefing includes it. Newsletter flags are kept for trials still listed.
+    """
+    old = old or {}
+    baseline = not old.get("trials") and not old.get("history")
+    hist = dict(old.get("history") or {})
+    # Caches written before history existed: their trials are the baseline.
+    for t in old.get("trials") or []:
+        hist.setdefault(
+            t["id"],
+            {
+                "first_seen": old.get("refreshed_at", now),
+                "baseline": True,
+                "briefed": True,
+            },
+        )
+    for t in trials:
+        if t["id"] not in hist:
+            hist[t["id"]] = {
+                "first_seen": now,
+                "baseline": baseline,
+                "briefed": baseline,
+            }
+    ids = {t["id"] for t in trials}
+    return {
+        "refreshed_at": now,
+        "source": SOURCE_NAME,
+        "trials": trials,
+        "history": hist,
+        "newsletter_ids": [i for i in old.get("newsletter_ids") or [] if i in ids],
+    }
+
+
+def refresh_trials() -> dict:
+    """Run the search, merge it into the cache, and return the cache."""
+    trials = fetch_open_us_trials()
+    payload = merge_refresh(load_trials(), trials, _now_iso())
+    _save_clean(payload)
+    _annotate(payload)
+    return payload
+
+
+def refreshed_today(tz_name: str | None = None) -> bool:
+    """True if the cache was refreshed today (in the send time zone)."""
+    data = load_trials()
+    if not data or not data.get("refreshed_at"):
+        return False
+    tz = _tz(tz_name)
+    then = datetime.fromisoformat(data["refreshed_at"]).astimezone(tz)
+    return then.date() == datetime.now(tz).date()
+
+
+def _tz(tz_name: str | None):
+    from zoneinfo import ZoneInfo
+
+    name = tz_name or os.getenv("SEND_TIMEZONE", "").strip() or "America/New_York"
+    try:
+        return ZoneInfo(name)
+    except Exception:
+        return timezone.utc
+
+
+# ── New trials → Intelligence Briefing ───────────────────────────────────────
+
+BRIEFING_SECTION = "New Clinical Trials"
+
+
+def unbriefed_trials(data: dict | None = None) -> list[dict]:
+    """Open trials first listed since the baseline that no briefing has included."""
+    data = data if data is not None else load_trials()
+    if not data:
+        return []
+    hist = data.get("history") or {}
+    return [
+        t
+        for t in data.get("trials") or []
+        if not (hist.get(t["id"]) or {}).get("briefed", True)
+    ]
+
+
+def briefing_section_md(trials: list[dict]) -> str:
+    """Markdown for the briefing's New Clinical Trials section (card layout)."""
+    if not trials:
+        return ""
+    parts = [f"## {BRIEFING_SECTION}", ""]
+    for t in trials:
+        title = t["title"].replace("[", "(").replace("]", ")")
+        enroll = (
+            f"; enrollment {t['enrollment']:,} ({t['enrollment_type'].lower()})"
+            if t.get("enrollment") is not None
+            else ""
+        )
+        pcd = (
+            f"; primary completion {t['primary_completion']}"
+            f" ({t['primary_completion_type'].lower()})"
+            if t.get("primary_completion")
+            else ""
+        )
+        sites = f"; {t['us_sites']} US site{'s' if t['us_sites'] != 1 else ''}"
+        dx = (
+            " Inclusion requires a surgically or pathologically confirmed diagnosis."
+            if t.get("confirmed_dx")
+            else ""
+        )
+        parts += [
+            f"**{title}** Sponsored by {t['lead_sponsor']} ({t['sponsor_type']}). "
+            f"{t['study_phase']}; {t['status'].lower()}{enroll}{pcd}{sites}.{dx}"
+            f" Newly listed on {SOURCE_NAME}.",
+            f"*→ [{t['id']} on {SOURCE_NAME}]({t['url']})*",
+            "",
+        ]
+    return "\n".join(parts).rstrip() + "\n"
+
+
+def add_trials_to_briefing(briefing_md: str, trials: list[dict]) -> str:
+    """Insert the New Clinical Trials section before References (or at the end)."""
+    section = briefing_section_md(trials)
+    if not section:
+        return briefing_md
+    m = re.search(r"^##\s+References\b", briefing_md, re.M)
+    if m:
+        return briefing_md[: m.start()] + section + "\n" + briefing_md[m.start() :]
+    return briefing_md.rstrip() + "\n\n" + section
+
+
+def mark_briefed(briefing_md: str) -> list[str]:
+    """Mark new trials that appear in an emailed briefing so they are not repeated."""
+    data = load_trials()
+    if not data or not briefing_md:
+        return []
+    done = [t["id"] for t in unbriefed_trials(data) if t["id"] in briefing_md]
+    for i in done:
+        data["history"][i]["briefed"] = True
+    if done:
+        _save_clean(data)
+    return done
+
+
+def _save_clean(data: dict) -> None:
+    """Save without the display-only fields _annotate adds."""
+    clean = dict(data)
+    clean["trials"] = [
+        {
+            k: v
+            for k, v in t.items()
+            if k not in ("first_seen", "is_new", "in_newsletter")
+        }
+        for t in data.get("trials") or []
+    ]
+    _save(clean)
+
+
+# ── Newsletter flags ──────────────────────────────────────────────────────────
+
+
+def set_in_newsletter(nct_id: str, include: bool) -> None:
+    data = load_trials()
+    if not data:
+        return
+    ids = [i for i in data["newsletter_ids"] if i != nct_id]
+    if include:
+        ids.append(nct_id)
+    data["newsletter_ids"] = ids
+    _save_clean(data)
+
+
+def newsletter_trials() -> list[dict]:
+    """Trials flagged for the newsletter, in the order they were flagged."""
+    data = load_trials()
+    if not data:
+        return []
+    by_id = {t["id"]: t for t in data["trials"]}
+    return [by_id[i] for i in data["newsletter_ids"] if i in by_id]
+
+
+def trial_snippet(t: dict) -> str:
+    """Plain-text description of a trial for the newsletter writer."""
+    bits = [
+        f"Clinical trial {t['id']}, sponsored by {t['lead_sponsor']} ({t['sponsor_type']}).",
+        f"{t['study_phase']}; status {t['status'].lower()}.",
+    ]
+    if t.get("enrollment") is not None:
+        bits.append(f"Enrollment {t['enrollment']:,} ({t['enrollment_type'].lower()}).")
+    if t.get("primary_completion"):
+        bits.append(
+            f"Primary completion {t['primary_completion']} "
+            f"({t['primary_completion_type'].lower()})."
+        )
+    bits.append(f"Sites: {', '.join(t.get('countries') or [])}.")
+    if t.get("confirmed_dx"):
+        bits.append(f"Inclusion criteria: {t['confirmed_dx_phrase']}.")
+    if t.get("summary"):
+        bits.append(f"Summary: {t['summary']}")
+    return " ".join(bits)
 
 
 def filter_trials(

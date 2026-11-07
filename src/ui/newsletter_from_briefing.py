@@ -51,6 +51,9 @@ article number given in the user message.
 - Only use facts present in the provided article titles, summaries, and metadata. \
 If a summary is thin, say less rather than inventing detail.
 - Do not invent new findings, numbers, trial names, or quotes.
+- Items from ClinicalTrials.gov are ongoing clinical trial listings, not results: \
+describe them as trials (sponsor, design and phase, status, enrollment, expected \
+completion) and never imply outcomes.
 - Preserve URLs exactly as provided.
 - Do not use em dashes excessively. Do not use filler phrases."""
 
@@ -909,6 +912,8 @@ def render_tab(deps: Dict[str, Any]) -> None:
             if gen:
                 _generate_and_open(deps, run, base, supporting, nl_title, nl_note)
 
+    _render_newsletter_trials()
+
     # ── Article tiles ──────────────────────────────────────────
     c1, c2, c3 = st.columns([2.2, 1.6, 1], vertical_alignment="center")
     with c1:
@@ -948,6 +953,74 @@ def render_tab(deps: Dict[str, Any]) -> None:
 
     if flyout_open:
         _render_flyout(base, sig)
+
+
+def _trial_article(t: Dict[str, Any]) -> Dict[str, Any]:
+    """A clinical trial in the shape of a supporting article."""
+    from src.pipelines.clinical_trials import trial_snippet
+
+    return {
+        "key": f"trial_{t['id']}",
+        "origin": "clinical_trial",
+        "title": f"{t['title']} ({t['id']})",
+        "url": t["url"],
+        "source": t.get("source") or "ClinicalTrials.gov",
+        "published_date": t.get("first_posted") or t.get("last_update") or "",
+        "snippet": trial_snippet(t),
+    }
+
+
+def _render_newsletter_trials() -> None:
+    """Trials ticked 'Newsletter' on the Clinical Trials tab, ready to add."""
+    try:
+        from src.pipelines.clinical_trials import newsletter_trials
+
+        trials = newsletter_trials()
+    except Exception:
+        trials = []
+    sup = st.session_state[_k("supporting")]
+    n_added = sum(1 for t in trials if f"trial_{t['id']}" in sup)
+    label = f"🧪 Clinical trials marked for the newsletter ({len(trials)})"
+    if n_added:
+        label += f" · {n_added} added"
+    with st.expander(label, expanded=bool(trials) and not n_added):
+        if not trials:
+            st.caption(
+                "None yet. Tick **Newsletter** next to a study on the Clinical "
+                "Trials tab to make it available here."
+            )
+            return
+        st.caption(
+            "Tick a trial to include it with the selected articles as a supporting item."
+        )
+        n_cols = 3
+        for row_start in range(0, len(trials), n_cols):
+            cols = st.columns(n_cols, gap="small")
+            for col, t in zip(cols, trials[row_start : row_start + n_cols]):
+                a = _trial_article(t)
+                cb_key = _k(f"sup_cb_{a['key']}")
+                st.session_state[cb_key] = a["key"] in sup
+                right = " · ".join(
+                    x for x in [t.get("study_phase"), t.get("status")] if x
+                )
+                with col:
+                    with st.container(key=f"nb2_trial_{t['id']}"):
+                        st.markdown(
+                            _card_html(
+                                {
+                                    **a,
+                                    "snippet": f"{t['lead_sponsor']} ({t['sponsor_type']})",
+                                },
+                                right,
+                            ),
+                            unsafe_allow_html=True,
+                        )
+                        st.checkbox(
+                            "Include in newsletter",
+                            key=cb_key,
+                            on_change=_on_toggle_supporting,
+                            args=(a, cb_key),
+                        )
 
 
 def _generate_and_open(

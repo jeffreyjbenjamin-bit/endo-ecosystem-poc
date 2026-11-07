@@ -14,6 +14,14 @@ footer. Keep each version's changes in its own <ul> list. -->
 
 <tr><td>2026-11-07</td><td>
 
+<b>v1.11.0</b>
+<ul>
+<li>Report Config moved from a tab to a <b>⚙️</b> button in the upper right of the top banner; <b>← Back</b> returns to the tab you were on, with your selections kept.</li>
+<li>Clinical Trials list refreshes automatically once a day, and again just before the daily email.</li>
+<li>Newly listed trials get a <b>NEW</b> badge and are added to the Intelligence Briefing in a <b>New Clinical Trials</b> section until a daily email has carried them.</li>
+<li><b>Newsletter</b> checkbox on each clinical trial; marked trials appear on Build Newsletter from Intel Briefing, where they can be added to the newsletter alongside the selected articles.</li>
+</ul>
+
 <b>v1.10.0</b>
 <ul>
 <li>New <b>Clinical Trials</b> tab (before Report Config): open endometriosis trials with at least one US site from ClinicalTrials.gov, with ID (linked to the study, source shown below), Title, Lead Sponsor, Study / Phase, Status, Primary Completion, Enrollment and Site Country.</li>

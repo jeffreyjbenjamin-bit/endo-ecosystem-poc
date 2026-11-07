@@ -224,6 +224,45 @@ def send_status() -> tuple[bool, str]:
 # ── Auto AI search ─────────────────────────────────────────────────────────────
 
 
+def _refresh_trials() -> None:
+    """Refresh the Clinical Trials list (failures never stop the send)."""
+    try:
+        from src.pipelines.clinical_trials import refresh_trials, unbriefed_trials
+
+        data = refresh_trials()
+        print(
+            f"  Clinical trials refreshed: {len(data['trials'])} open, "
+            f"{len(unbriefed_trials(data))} new for the briefing."
+        )
+    except Exception as exc:
+        print(f"  Clinical trials refresh failed: {exc}")
+
+
+def _with_new_trials(briefing_text: str) -> str:
+    """Add the New Clinical Trials section for trials not yet emailed."""
+    try:
+        from src.pipelines.clinical_trials import (
+            add_trials_to_briefing,
+            unbriefed_trials,
+        )
+
+        return add_trials_to_briefing(briefing_text, unbriefed_trials())
+    except Exception as exc:
+        print(f"  Could not add new clinical trials: {exc}")
+        return briefing_text
+
+
+def _mark_trials_briefed(briefing_text: str) -> None:
+    try:
+        from src.pipelines.clinical_trials import mark_briefed
+
+        done = mark_briefed(briefing_text)
+        if done:
+            print(f"  New clinical trials included: {', '.join(done)}")
+    except Exception as exc:
+        print(f"  Could not record emailed clinical trials: {exc}")
+
+
 def _run_ai_search() -> bool:
     """Run the AI Article Search pipeline and save the result. Returns True on success."""
     print("Running AI Search pipeline…")
@@ -243,6 +282,8 @@ def _run_ai_search() -> bool:
         topic = "endometriosis"
         date_range_days = 90
         categories: list = []
+
+        _refresh_trials()
 
         print("  Generating search queries…")
         queries = generate_search_queries(topic, date_range_days, categories)
@@ -268,6 +309,7 @@ def _run_ai_search() -> bool:
         briefing_text, perf = synthesize_briefing(
             scored, topic, date_range_days, CHAT_DEPLOYMENT_5
         )
+        briefing_text = _with_new_trials(briefing_text)
 
         save_ai_search_run(
             topic=topic,
@@ -352,6 +394,8 @@ def main(force: bool = False, auto_search: bool = False) -> None:
                 print(
                     f"  Briefing: {len(ok)} sent, {len(fail)} failed. {len(new_items)} new sources."
                 )
+                if ok:
+                    _mark_trials_briefed(briefing_text)
             else:
                 print("No recipients subscribed to AI Briefing.")
         else:

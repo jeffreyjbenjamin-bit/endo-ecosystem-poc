@@ -6,6 +6,9 @@ it checks whether the daily send is due (time set in the Report Config tab, read
 SEND_TIMEZONE) and, if so, runs `send_daily_briefing.py --auto-search` in a child
 process. send_daily_briefing.py records each day's send, so it never sends twice.
 
+It also refreshes the Clinical Trials list once a day (and the daily send refreshes
+it again just before writing the briefing).
+
 Output goes to stdout (Azure log stream) and <state dir>/daily_send.log.
 Set DAILY_SEND_ENABLED=0 to switch it off.
 """
@@ -26,6 +29,7 @@ from send_daily_briefing import send_status  # noqa: E402
 from src.common.paths import STATE_DIR  # noqa: E402
 
 CHECK_EVERY_SECONDS = 60
+TRIALS_RETRY_SECONDS = 30 * 60  # how often to check whether today's refresh ran
 LOG_PATH = STATE_DIR / "daily_send.log"
 
 
@@ -56,12 +60,30 @@ def run_send() -> None:
     log(f"Daily send finished (exit code {proc.returncode}).")
 
 
+def refresh_trials_if_due() -> None:
+    """Refresh the Clinical Trials list once per day (send time zone)."""
+    from src.pipelines.clinical_trials import (
+        refresh_trials,
+        refreshed_today,
+        unbriefed_trials,
+    )
+
+    if refreshed_today():
+        return
+    data = refresh_trials()
+    log(
+        f"Clinical trials refreshed: {len(data['trials'])} open, "
+        f"{len(unbriefed_trials(data))} new for the next briefing."
+    )
+
+
 def main() -> None:
     if os.getenv("DAILY_SEND_ENABLED", "1").strip().lower() in ("0", "false", "no"):
         log("DAILY_SEND_ENABLED is off; scheduler not running.")
         return
     tz = os.getenv("SEND_TIMEZONE", "") or "system local time"
     log(f"Scheduler started (time zone: {tz}). {send_status()[1]}")
+    next_trials_check = 0.0
     while True:
         try:
             due, _reason = send_status()
@@ -69,6 +91,12 @@ def main() -> None:
                 run_send()
         except Exception as exc:  # keep the loop alive no matter what
             log(f"ERROR: {exc!r}")
+        if time.monotonic() >= next_trials_check:
+            next_trials_check = time.monotonic() + TRIALS_RETRY_SECONDS
+            try:
+                refresh_trials_if_due()
+            except Exception as exc:
+                log(f"Clinical trials refresh failed: {exc!r}")
         time.sleep(CHECK_EVERY_SECONDS)
 
 

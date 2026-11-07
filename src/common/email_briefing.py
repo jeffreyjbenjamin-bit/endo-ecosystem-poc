@@ -120,6 +120,7 @@ def _md_inline(text: str) -> str:
 _CARD_SECTIONS = {
     "Key Developments",
     "Industry & Company News",
+    "New Clinical Trials",
     "Diagnostics",
     "Therapeutics",
     "Epidemiology",
