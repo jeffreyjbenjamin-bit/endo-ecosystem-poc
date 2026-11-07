@@ -36,8 +36,9 @@ REPO_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(REPO_ROOT))
 
 from src.common.email_briefing import send_briefing, smtp_configured  # noqa: E402
+from src.common.paths import STATE_DIR  # noqa: E402
 
-DATA_DIR = REPO_ROOT / "data"
+DATA_DIR = STATE_DIR
 MAILING_LIST_DB = str(DATA_DIR / "mailing_list.sqlite")
 AI_SEARCH_DB = str(DATA_DIR / "ai_search_runs.sqlite")
 NEWSLETTERS_DB = str(DATA_DIR / "newsletters.sqlite")

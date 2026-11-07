@@ -1,0 +1,72 @@
+name: Deploy to Azure
+
+# Builds the Docker image in Azure Container Registry and points the web app at it.
+# Runs on every push to main, or manually from the Actions tab.
+#
+# Sign-in uses GitHub OIDC (no stored passwords): the Azure app registration
+# "github-endo-ecosystem-deploy" trusts only this repo's main branch.
+# The IDs below are identifiers, not secrets.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: deploy-azure
+  cancel-in-progress: false
+
+env:
+  AZURE_CLIENT_ID: 8fb4a70a-c7df-4c78-aec9-219891978a55
+  AZURE_TENANT_ID: a0b9a75b-5424-49ad-83e0-27c287ff59e9
+  AZURE_SUBSCRIPTION_ID: 54814f7d-4d8d-4f2e-895b-f1265fe7d116
+  REGISTRY: boldwaveendoacr
+  IMAGE: boldwave-endo-app
+  RESOURCE_GROUP: rg-boldwave-endo-review
+  WEBAPP: boldwave-endo-review
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Build image in Azure Container Registry
+        run: |
+          TAG="gh-${GITHUB_SHA::7}"
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
+          az acr build --registry "$REGISTRY" --image "$IMAGE:$TAG" .
+
+      - name: Point web app at the new image
+        run: |
+          az webapp config container set \
+            -g "$RESOURCE_GROUP" -n "$WEBAPP" \
+            --container-image-name "$REGISTRY.azurecr.io/$IMAGE:$TAG" \
+            --output none
+
+      - name: Wait for the site to come up
+        run: |
+          URL="https://$WEBAPP.azurewebsites.net/_stcore/health"
+          for i in $(seq 1 40); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 20 "$URL" || true)
+            echo "attempt $i: $code"
+            [ "$code" = "200" ] && exit 0
+            sleep 15
+          done
+          echo "Site did not report healthy in time"; exit 1
+
+      - name: Summary
+        run: |
+          echo "Deployed **$IMAGE:$TAG** to https://$WEBAPP.azurewebsites.net" >> "$GITHUB_STEP_SUMMARY"
+          echo "Roll back: az webapp config container set -g $RESOURCE_GROUP -n $WEBAPP --container-image-name $REGISTRY.azurecr.io/$IMAGE:<previous tag>" >> "$GITHUB_STEP_SUMMARY"

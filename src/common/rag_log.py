@@ -13,7 +13,9 @@ import json
 import sqlite3
 from typing import List, Dict, Optional
 
-DATA_DIR = "./data"
+from src.common.paths import STATE_DIR
+
+DATA_DIR = str(STATE_DIR)
 SQLITE_PATH = os.path.join(DATA_DIR, "rag_logs.sqlite")
 JSONL_PATH = os.path.join(DATA_DIR, "rag_logs.jsonl")
 

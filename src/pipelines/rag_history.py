@@ -7,8 +7,12 @@ Usage:
 import os
 import sys
 import sqlite3
+from pathlib import Path
 
-SQLITE_PATH = "./data/rag_logs.sqlite"
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from src.common.paths import state_path  # noqa: E402
+
+SQLITE_PATH = state_path("rag_logs.sqlite")
 
 
 def main():

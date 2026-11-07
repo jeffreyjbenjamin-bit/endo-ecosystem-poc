@@ -28,12 +28,13 @@ from dotenv import load_dotenv
 from openai import AzureOpenAI
 
 from src.connectors.search_provider import SearchProvider, SearchResult
+from src.common.paths import state_path
 
 load_dotenv()
 
 # ── Paths / config ────────────────────────────────────────────
 REPO_ROOT = Path(__file__).resolve().parents[2]
-AI_SEARCH_DB = str(REPO_ROOT / "data" / "ai_search_runs.sqlite")
+AI_SEARCH_DB = state_path("ai_search_runs.sqlite")
 
 CHAT_ENDPOINT = os.getenv("AZURE_OPENAI_CHAT_ENDPOINT") or os.getenv(
     "AZURE_OPENAI_ENDPOINT", ""

@@ -50,6 +50,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 import streamlit.components.v1 as _st_components  # noqa: E402
+from src.common.paths import state_path  # noqa: E402
 
 try:
     from src.common.email_briefing import (
@@ -220,7 +221,7 @@ st.markdown(
 # ============================================================
 PARQUET_PATH = os.getenv("PARQUET_PATH", str(REPO_ROOT / "data" / "documents.parquet"))
 DB_PATH = os.getenv("VECTOR_DB_PATH", str(REPO_ROOT / "data" / "vector_store.sqlite"))
-LOG_DB_PATH = str(REPO_ROOT / "data" / "rag_logs.sqlite")
+LOG_DB_PATH = state_path("rag_logs.sqlite")
 FAISS_INDEX_PATH = os.getenv(
     "FAISS_INDEX_PATH", str(REPO_ROOT / "data" / "vector_store.faiss")
 )
@@ -243,8 +244,8 @@ TEXT_CHAR_LIMIT = int(os.getenv("RAG_TEXT_CHAR_LIMIT", "8000"))
 SNIPPET_CHAR_LIMIT = int(os.getenv("RAG_SNIPPET_CHAR_LIMIT", "1200"))
 MAX_CONTEXT_CHARS = int(os.getenv("RAG_MAX_CONTEXT_CHARS", "12000"))
 
-RAG_BRIEF_DB = str(REPO_ROOT / "data" / "rag_briefs.sqlite")
-COMPARE_DB = str(REPO_ROOT / "data" / "comparisons.sqlite")
+RAG_BRIEF_DB = state_path("rag_briefs.sqlite")
+COMPARE_DB = state_path("comparisons.sqlite")
 
 
 # ── RAG briefing persistence ──────────────────────────────────
@@ -353,7 +354,7 @@ def save_comparison(
 
 # ── Newsletter persistence ────────────────────────────────────
 
-NEWSLETTER_DB = str(REPO_ROOT / "data" / "newsletters.sqlite")
+NEWSLETTER_DB = state_path("newsletters.sqlite")
 
 
 def _ensure_newsletter_db(db_path: str = NEWSLETTER_DB) -> sqlite3.Connection:
@@ -429,7 +430,7 @@ def load_newsletters(limit: int = 20) -> List[Dict[str, Any]]:
 
 # ── Mailing list persistence ──────────────────────────────────
 
-MAILING_LIST_DB = str(REPO_ROOT / "data" / "mailing_list.sqlite")
+MAILING_LIST_DB = state_path("mailing_list.sqlite")
 
 
 def _ensure_mailing_list_db(db_path: str = MAILING_LIST_DB) -> sqlite3.Connection:
