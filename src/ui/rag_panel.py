@@ -1055,14 +1055,15 @@ SHOW_LEGACY_TABS = os.getenv("SHOW_LEGACY_TABS", "0").strip().lower() in (
 _tab_labels = [TAB_BRIEFING, TAB_NL_FROM_BRIEF]
 if SHOW_LEGACY_TABS:
     _tab_labels += ["📚 RAG Article Presentation", "📰 Newsletter Builder"]
-_tab_labels.append("📧 Report Config")
+TAB_TRIALS = "🧪 Clinical Trials"
+_tab_labels += [TAB_TRIALS, "📧 Report Config"]
 _tabs = st.tabs(
     _tab_labels,
     # Returning from the newsletter editing page lands back on its tab
     default=TAB_NL_FROM_BRIEF if st.session_state.pop("return_to_nb2", False) else None,
 )
 tab_search, tab_nl_v2 = _tabs[0], _tabs[1]
-tab_nl_config = _tabs[-1]
+tab_trials, tab_nl_config = _tabs[-2], _tabs[-1]
 tab_rag, tab_newsletter = (_tabs[2], _tabs[3]) if SHOW_LEGACY_TABS else (None, None)
 
 # Sidebar: model selector + disabled dataset updater + new chat
@@ -2272,6 +2273,15 @@ For each finding, write a standalone paragraph block — no bullet dashes. Follo
 
 
 # ============================================================
+# Tab: Clinical Trials
+# ============================================================
+with tab_trials:
+    from src.ui.clinical_trials_tab import render_tab as _ct_render
+
+    _ct_render(os.getenv("SEND_TIMEZONE", "").strip() or "America/New_York")
+
+
+# ============================================================
 # Tab: Report Config
 # ============================================================
 with tab_nl_config:
@@ -3088,12 +3098,8 @@ with tab_search:
             "UNKNOWN": ("error", "Unknown error", _diag.error_detail),
         }
 
-        if _diag.ok:
-            st.success(
-                f"Search provider: **Google CSE** — connected  "
-                f"(key: `{_diag.key_hint}` · cx: `{_diag.cx_hint}`)"
-            )
-        else:
+        # Only problems are shown; a working connection needs no banner.
+        if not _diag.ok:
             _sev, _title, _guidance = _diag_labels.get(
                 _diag.error_category or "UNKNOWN",
                 ("error", _diag.error_category, _diag.error_detail),

@@ -14,6 +14,15 @@ footer. Keep each version's changes in its own <ul> list. -->
 
 <tr><td>2026-11-07</td><td>
 
+<b>v1.10.0</b>
+<ul>
+<li>New <b>Clinical Trials</b> tab (before Report Config): open endometriosis trials with at least one US site from ClinicalTrials.gov, with ID (linked to the study, source shown below), Title, Lead Sponsor, Study / Phase, Status, Primary Completion, Enrollment and Site Country.</li>
+<li><b>Refresh</b> runs a new search; the last results are kept between visits.</li>
+<li><b>Companies only</b> filter hides academic, hospital and government sponsors.</li>
+<li><b>Confirmed endometriosis only</b> filter keeps trials whose inclusion criteria require a surgically or pathologically confirmed diagnosis.</li>
+<li>"Search provider" status message removed from Build Intelligence Briefing (problems with the search connection are still shown).</li>
+</ul>
+
 <b>v1.9.0</b>
 <ul>
 <li>Build Intelligence Briefing now searches company press releases: a new <b>Industry &amp; Press Releases</b> focus area (Business Wire, PR Newswire, GlobeNewswire, and Phase 1–3 / diagnostics announcements), included automatically when no focus area is chosen. All existing searches are unchanged.</li>
