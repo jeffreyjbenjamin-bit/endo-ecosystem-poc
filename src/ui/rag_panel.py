@@ -1011,6 +1011,13 @@ def _nb2_deps() -> Dict[str, Any]:
         "save_newsletter": save_newsletter,
         "update_newsletter": update_newsletter,
         "load_newsletter": load_newsletter,
+        "load_newsletters": load_newsletters,
+        "get_nl_config": get_nl_config,
+        "set_nl_config": set_nl_config,
+        "load_recipients": load_recipients,
+        "mark_recipient_sent": mark_recipient_sent,
+        "smtp_configured": smtp_configured,
+        "send_briefing": send_briefing,
         "render_newsletter_html": render_newsletter_html,
         "html_component": _st_components.html,
     }
@@ -1037,23 +1044,25 @@ st.title("Evidence Gap")
 
 TAB_BRIEFING = "🔍 Build Intelligence Briefing"
 TAB_NL_FROM_BRIEF = "🗞️ Build Newsletter from Intel Briefing"
-(
-    tab_search,
-    tab_nl_v2,
-    tab_rag,
-    tab_newsletter,
-    tab_nl_config,
-) = st.tabs(
-    [
-        TAB_BRIEFING,
-        TAB_NL_FROM_BRIEF,
-        "📚 RAG Article Presentation",
-        "📰 Newsletter Builder",
-        "📧 Report Config",
-    ],
+# RAG Article Presentation and the original Newsletter Builder are hidden (not deleted).
+# Set SHOW_LEGACY_TABS=1 to show them again.
+SHOW_LEGACY_TABS = os.getenv("SHOW_LEGACY_TABS", "0").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+)
+_tab_labels = [TAB_BRIEFING, TAB_NL_FROM_BRIEF]
+if SHOW_LEGACY_TABS:
+    _tab_labels += ["📚 RAG Article Presentation", "📰 Newsletter Builder"]
+_tab_labels.append("📧 Report Config")
+_tabs = st.tabs(
+    _tab_labels,
     # Returning from the newsletter editing page lands back on its tab
     default=TAB_NL_FROM_BRIEF if st.session_state.pop("return_to_nb2", False) else None,
 )
+tab_search, tab_nl_v2 = _tabs[0], _tabs[1]
+tab_nl_config = _tabs[-1]
+tab_rag, tab_newsletter = (_tabs[2], _tabs[3]) if SHOW_LEGACY_TABS else (None, None)
 
 # Sidebar: model selector + disabled dataset updater + new chat
 st.markdown(
@@ -1063,278 +1072,283 @@ st.markdown(
 # ============================================================
 # Tab: Newsletter Builder
 # ============================================================
-with tab_newsletter:
+if SHOW_LEGACY_TABS:
+    with tab_newsletter:
 
-    # ── Session state init ────────────────────────────────────
-    for _k, _v in [
-        ("nl_draft", ""),
-        ("nl_saved_id", None),
-        ("nl_selected_ids", set()),
-        ("nl_undo_stack", []),
-        ("nl_topic_intel", ""),
-        ("nl_topic_topics", None),
-        ("nl_topic_active", None),
-    ]:
-        if _k not in st.session_state:
-            st.session_state[_k] = _v
+        # ── Session state init ────────────────────────────────────
+        for _k, _v in [
+            ("nl_draft", ""),
+            ("nl_saved_id", None),
+            ("nl_selected_ids", set()),
+            ("nl_undo_stack", []),
+            ("nl_topic_intel", ""),
+            ("nl_topic_topics", None),
+            ("nl_topic_active", None),
+        ]:
+            if _k not in st.session_state:
+                st.session_state[_k] = _v
 
-    # ── Import pipeline ───────────────────────────────────────
-    try:
-        from src.pipelines.ai_search import (
-            load_recent_runs as _nl_load_ai,
-            AI_SEARCH_DB as _NL_AI_DB,
-            CHAT_DEPLOYMENT_5 as _NL_DEPLOY,
-            make_chat_client as _nl_make_client,
-        )
+        # ── Import pipeline ───────────────────────────────────────
+        try:
+            from src.pipelines.ai_search import (
+                load_recent_runs as _nl_load_ai,
+                AI_SEARCH_DB as _NL_AI_DB,
+                CHAT_DEPLOYMENT_5 as _NL_DEPLOY,
+                make_chat_client as _nl_make_client,
+            )
 
-        _nl_ok = True
-    except Exception as _nl_err:
-        st.error(f"Could not load pipeline: {_nl_err}")
-        _nl_ok = False
+            _nl_ok = True
+        except Exception as _nl_err:
+            st.error(f"Could not load pipeline: {_nl_err}")
+            _nl_ok = False
 
-    if _nl_ok:
+        if _nl_ok:
 
-        # ── Load saved runs (always needed by both views) ─────
-        _nl_ai_runs = _nl_load_ai(_NL_AI_DB, limit=30)
-        _nl_rag_runs = load_rag_briefs(limit=30)
+            # ── Load saved runs (always needed by both views) ─────
+            _nl_ai_runs = _nl_load_ai(_NL_AI_DB, limit=30)
+            _nl_rag_runs = load_rag_briefs(limit=30)
 
-        # ── Read settings from session state (persist across views)
-        _nl_title = st.session_state.get("nl_title_input", "Endometriosis Newsletter")
-        _nl_period = st.session_state.get("nl_period_input", "")
-        _nl_source_sel = st.session_state.get("nl_source_sel", "Both")
-        _nl_date_range = st.session_state.get("nl_date_range", 90)
-        _nl_cat_filter = st.session_state.get("nl_cat_filter", [])
-        _nl_custom_note = st.session_state.get("nl_custom_note", "")
-        _nl_pub_date_only = st.session_state.get("nl_pub_date_only", False)
-        _nl_pub_age = st.session_state.get("nl_pub_age", 0)  # 0 = no filter
+            # ── Read settings from session state (persist across views)
+            _nl_title = st.session_state.get(
+                "nl_title_input", "Endometriosis Newsletter"
+            )
+            _nl_period = st.session_state.get("nl_period_input", "")
+            _nl_source_sel = st.session_state.get("nl_source_sel", "Both")
+            _nl_date_range = st.session_state.get("nl_date_range", 90)
+            _nl_cat_filter = st.session_state.get("nl_cat_filter", [])
+            _nl_custom_note = st.session_state.get("nl_custom_note", "")
+            _nl_pub_date_only = st.session_state.get("nl_pub_date_only", False)
+            _nl_pub_age = st.session_state.get("nl_pub_age", 0)  # 0 = no filter
 
-        # ── Build highlight pool (always, both views need it) ─
-        _nl_all_items: List[Dict[str, Any]] = []
-        _cutoff_dt = datetime.now(timezone.utc).timestamp() - _nl_date_range * 86400
+            # ── Build highlight pool (always, both views need it) ─
+            _nl_all_items: List[Dict[str, Any]] = []
+            _cutoff_dt = datetime.now(timezone.utc).timestamp() - _nl_date_range * 86400
 
-        if _nl_source_sel in ("Both", "AI Search only"):
-            for _r in _nl_ai_runs:
-                try:
-                    _rts = datetime.fromisoformat(
-                        _r["run_ts"].replace("Z", "+00:00")
-                    ).timestamp()
-                except Exception:
-                    _rts = 0
-                if _rts < _cutoff_dt:
-                    continue
-                _bt = _r.get("briefing_text") or ""
-                if _bt:
-                    _nl_all_items.extend(
-                        _extract_highlights(
-                            _bt,
-                            "AI Search",
-                            _r["id"],
-                            _r["run_ts"],
-                            _r.get("topic", "endometriosis"),
-                            url_date_map=_build_url_date_map(
-                                _r.get("sources_json") or "[]"
-                            ),
+            if _nl_source_sel in ("Both", "AI Search only"):
+                for _r in _nl_ai_runs:
+                    try:
+                        _rts = datetime.fromisoformat(
+                            _r["run_ts"].replace("Z", "+00:00")
+                        ).timestamp()
+                    except Exception:
+                        _rts = 0
+                    if _rts < _cutoff_dt:
+                        continue
+                    _bt = _r.get("briefing_text") or ""
+                    if _bt:
+                        _nl_all_items.extend(
+                            _extract_highlights(
+                                _bt,
+                                "AI Search",
+                                _r["id"],
+                                _r["run_ts"],
+                                _r.get("topic", "endometriosis"),
+                                url_date_map=_build_url_date_map(
+                                    _r.get("sources_json") or "[]"
+                                ),
+                            )
                         )
-                    )
 
-        if _nl_source_sel in ("Both", "RAG only"):
-            for _r in _nl_rag_runs:
-                try:
-                    _rts = datetime.fromisoformat(
-                        _r["run_ts"].replace("Z", "+00:00")
-                    ).timestamp()
-                except Exception:
-                    _rts = 0
-                if _rts < _cutoff_dt:
-                    continue
-                _bt = _r.get("briefing_text") or ""
-                if _bt:
-                    _nl_all_items.extend(
-                        _extract_highlights(
-                            _bt,
-                            "RAG",
-                            _r["id"],
-                            _r["run_ts"],
-                            _r.get("filter", "All articles"),
-                            url_date_map=_build_url_date_map(
-                                _r.get("sources_json") or "[]"
-                            ),
+            if _nl_source_sel in ("Both", "RAG only"):
+                for _r in _nl_rag_runs:
+                    try:
+                        _rts = datetime.fromisoformat(
+                            _r["run_ts"].replace("Z", "+00:00")
+                        ).timestamp()
+                    except Exception:
+                        _rts = 0
+                    if _rts < _cutoff_dt:
+                        continue
+                    _bt = _r.get("briefing_text") or ""
+                    if _bt:
+                        _nl_all_items.extend(
+                            _extract_highlights(
+                                _bt,
+                                "RAG",
+                                _r["id"],
+                                _r["run_ts"],
+                                _r.get("filter", "All articles"),
+                                url_date_map=_build_url_date_map(
+                                    _r.get("sources_json") or "[]"
+                                ),
+                            )
                         )
-                    )
 
-        if _nl_cat_filter:
-            _nl_all_items = [
-                it
-                for it in _nl_all_items
-                if any(f.lower() in it["section"].lower() for f in _nl_cat_filter)
-            ]
+            if _nl_cat_filter:
+                _nl_all_items = [
+                    it
+                    for it in _nl_all_items
+                    if any(f.lower() in it["section"].lower() for f in _nl_cat_filter)
+                ]
 
-        if _nl_pub_date_only:
-            _nl_all_items = [it for it in _nl_all_items if it.get("published_date")]
+            if _nl_pub_date_only:
+                _nl_all_items = [it for it in _nl_all_items if it.get("published_date")]
 
-        if _nl_pub_age > 0:
-            _pub_cutoff = datetime.now(timezone.utc).timestamp() - _nl_pub_age * 86400
-            _filtered = []
-            for _it in _nl_all_items:
-                _pd = _it.get("published_date", "")
-                if not _pd:
-                    continue  # exclude items with no published date when this filter is active
-                try:
-                    _pd_ts = (
-                        datetime.strptime(_pd[:10], "%Y-%m-%d")
-                        .replace(tzinfo=timezone.utc)
-                        .timestamp()
-                    )
-                    if _pd_ts >= _pub_cutoff:
-                        _filtered.append(_it)
-                except Exception:
-                    pass
-            _nl_all_items = _filtered
+            if _nl_pub_age > 0:
+                _pub_cutoff = (
+                    datetime.now(timezone.utc).timestamp() - _nl_pub_age * 86400
+                )
+                _filtered = []
+                for _it in _nl_all_items:
+                    _pd = _it.get("published_date", "")
+                    if not _pd:
+                        continue  # exclude items with no published date when this filter is active
+                    try:
+                        _pd_ts = (
+                            datetime.strptime(_pd[:10], "%Y-%m-%d")
+                            .replace(tzinfo=timezone.utc)
+                            .timestamp()
+                        )
+                        if _pd_ts >= _pub_cutoff:
+                            _filtered.append(_it)
+                    except Exception:
+                        pass
+                _nl_all_items = _filtered
 
-        # ── Navigation buttons ────────────────────────────────
-        _nl_view = st.session_state.get("nl_view", "highlights")
-        _nav1, _nav2 = st.columns(2, gap="small")
-        with _nav1:
-            if st.button(
-                "📋 Select Highlights",
-                use_container_width=True,
-                key="nl_nav_highlights",
-                type="primary" if _nl_view == "highlights" else "secondary",
-            ):
-                st.session_state["nl_view"] = "highlights"
-                st.rerun()
-        with _nav2:
-            if st.button(
-                "📰 Newsletter Builder",
-                use_container_width=True,
-                key="nl_nav_builder",
-                type="primary" if _nl_view == "builder" else "secondary",
-            ):
-                st.session_state["nl_view"] = "builder"
-                st.rerun()
-
-        st.markdown("---")
-
-        # ════════════════════════════════════════════════════
-        # VIEW 1 — Select Highlights
-        # ════════════════════════════════════════════════════
-        if _nl_view == "highlights":
-
-            # ── Settings ──────────────────────────────────────
-            with st.expander("Newsletter Settings", expanded=True):
-                _nl_c1, _nl_c2, _nl_c3 = st.columns([2, 2, 2], gap="medium")
-                with _nl_c1:
-                    _nl_title = st.text_input(
-                        "Newsletter title",
-                        value=_nl_title or "Endometriosis Newsletter",
-                        key="nl_title_input",
-                    )
-                    _nl_period = st.text_input(
-                        "Coverage period",
-                        placeholder="e.g. June 2025",
-                        key="nl_period_input",
-                    )
-                with _nl_c2:
-                    _nl_source_sel = st.radio(
-                        "Source",
-                        ["Both", "AI Search only", "RAG only"],
-                        index=["Both", "AI Search only", "RAG only"].index(
-                            _nl_source_sel
-                        ),
-                        horizontal=True,
-                        key="nl_source_sel",
-                    )
-                    _nl_date_range = st.slider(
-                        "Max run age (days)",
-                        7,
-                        365,
-                        _nl_date_range,
-                        key="nl_date_range",
-                    )
-                    _nl_pub_age = st.slider(
-                        "Max publish age (days)",
-                        0,
-                        365,
-                        _nl_pub_age,
-                        key="nl_pub_age",
-                        help="0 = no filter. Only shows items whose published date is within this many days. Items without a published date are excluded when this is set.",
-                    )
-                with _nl_c3:
-                    _ALL_CATS = [
-                        "Research",
-                        "Diagnostics",
-                        "Biomarkers",
-                        "Clinical Trials",
-                        "Regulatory",
-                        "Funding",
-                        "Pharma/Biotech",
-                        "Market/News",
-                        "General",
-                        "Intelligence Summary",
-                        "Key Developments",
-                        "Clinical & Regulatory Highlights",
-                        "Emerging Research Themes",
-                        "What to Watch",
-                    ]
-                    _nl_cat_filter = st.multiselect(
-                        "Section / category filter",
-                        options=_ALL_CATS,
-                        default=_nl_cat_filter,
-                        key="nl_cat_filter",
-                        placeholder="All sections (leave blank)",
-                    )
-                    _nl_pub_date_only = st.checkbox(
-                        "Only show items with a Published date",
-                        value=_nl_pub_date_only,
-                        key="nl_pub_date_only",
-                        help="Hides highlights where only a Run date is available",
-                    )
-                    _nl_custom_note = st.text_area(
-                        "Editorial note (optional)",
-                        value=_nl_custom_note,
-                        placeholder="Add a note for the AI editor, e.g. tone, audience, focus…",
-                        height=70,
-                        key="nl_custom_note",
-                    )
+            # ── Navigation buttons ────────────────────────────────
+            _nl_view = st.session_state.get("nl_view", "highlights")
+            _nav1, _nav2 = st.columns(2, gap="small")
+            with _nav1:
+                if st.button(
+                    "📋 Select Highlights",
+                    use_container_width=True,
+                    key="nl_nav_highlights",
+                    type="primary" if _nl_view == "highlights" else "secondary",
+                ):
+                    st.session_state["nl_view"] = "highlights"
+                    st.rerun()
+            with _nav2:
+                if st.button(
+                    "📰 Newsletter Builder",
+                    use_container_width=True,
+                    key="nl_nav_builder",
+                    type="primary" if _nl_view == "builder" else "secondary",
+                ):
+                    st.session_state["nl_view"] = "builder"
+                    st.rerun()
 
             st.markdown("---")
 
-            # ── AI Topic Intelligence ──────────────────────────
-            if _nl_all_items:
-                _ti_header_col, _ti_btn_col = st.columns([6, 1], gap="small")
-                with _ti_header_col:
-                    st.markdown(
-                        "<div style='font-size:15px;font-weight:700;color:#0d2137;margin-bottom:2px'>"
-                        "Topic Intelligence</div>"
-                        "<div style='font-size:12px;color:#7f8c8d;margin-bottom:8px'>"
-                        "AI-identified topics you can click to filter the highlights below.</div>",
-                        unsafe_allow_html=True,
-                    )
-                with _ti_btn_col:
-                    _ti_gen_btn = st.button(
-                        "✨ Generate",
-                        key="nl_ti_generate",
-                        use_container_width=True,
-                        help="Ask the AI to identify top topics across available highlights",
-                    )
-                    if st.button(
-                        "🗑 Clear", key="nl_ti_clear", use_container_width=True
-                    ):
-                        st.session_state.pop("nl_topic_topics", None)
-                        st.session_state["nl_topic_active"] = None
-                        st.rerun()
+            # ════════════════════════════════════════════════════
+            # VIEW 1 — Select Highlights
+            # ════════════════════════════════════════════════════
+            if _nl_view == "highlights":
 
-                if _ti_gen_btn:
-                    _ti_digest_lines = []
-                    for _idx, _it in enumerate(_nl_all_items):
-                        _pd = _it.get("published_date", "")
-                        _date_str = f"[{_pd[:10]}]" if _pd else ""
-                        _ti_digest_lines.append(
-                            f"{_idx}|[{_it['section']}]{_date_str} {_it['content'][:180]}"
+                # ── Settings ──────────────────────────────────────
+                with st.expander("Newsletter Settings", expanded=True):
+                    _nl_c1, _nl_c2, _nl_c3 = st.columns([2, 2, 2], gap="medium")
+                    with _nl_c1:
+                        _nl_title = st.text_input(
+                            "Newsletter title",
+                            value=_nl_title or "Endometriosis Newsletter",
+                            key="nl_title_input",
                         )
-                    _ti_digest = "\n".join(_ti_digest_lines[:150])
+                        _nl_period = st.text_input(
+                            "Coverage period",
+                            placeholder="e.g. June 2025",
+                            key="nl_period_input",
+                        )
+                    with _nl_c2:
+                        _nl_source_sel = st.radio(
+                            "Source",
+                            ["Both", "AI Search only", "RAG only"],
+                            index=["Both", "AI Search only", "RAG only"].index(
+                                _nl_source_sel
+                            ),
+                            horizontal=True,
+                            key="nl_source_sel",
+                        )
+                        _nl_date_range = st.slider(
+                            "Max run age (days)",
+                            7,
+                            365,
+                            _nl_date_range,
+                            key="nl_date_range",
+                        )
+                        _nl_pub_age = st.slider(
+                            "Max publish age (days)",
+                            0,
+                            365,
+                            _nl_pub_age,
+                            key="nl_pub_age",
+                            help="0 = no filter. Only shows items whose published date is within this many days. Items without a published date are excluded when this is set.",
+                        )
+                    with _nl_c3:
+                        _ALL_CATS = [
+                            "Research",
+                            "Diagnostics",
+                            "Biomarkers",
+                            "Clinical Trials",
+                            "Regulatory",
+                            "Funding",
+                            "Pharma/Biotech",
+                            "Market/News",
+                            "General",
+                            "Intelligence Summary",
+                            "Key Developments",
+                            "Clinical & Regulatory Highlights",
+                            "Emerging Research Themes",
+                            "What to Watch",
+                        ]
+                        _nl_cat_filter = st.multiselect(
+                            "Section / category filter",
+                            options=_ALL_CATS,
+                            default=_nl_cat_filter,
+                            key="nl_cat_filter",
+                            placeholder="All sections (leave blank)",
+                        )
+                        _nl_pub_date_only = st.checkbox(
+                            "Only show items with a Published date",
+                            value=_nl_pub_date_only,
+                            key="nl_pub_date_only",
+                            help="Hides highlights where only a Run date is available",
+                        )
+                        _nl_custom_note = st.text_area(
+                            "Editorial note (optional)",
+                            value=_nl_custom_note,
+                            placeholder="Add a note for the AI editor, e.g. tone, audience, focus…",
+                            height=70,
+                            key="nl_custom_note",
+                        )
 
-                    _ti_prompt = f"""You are an endometriosis research intelligence analyst.
+                st.markdown("---")
+
+                # ── AI Topic Intelligence ──────────────────────────
+                if _nl_all_items:
+                    _ti_header_col, _ti_btn_col = st.columns([6, 1], gap="small")
+                    with _ti_header_col:
+                        st.markdown(
+                            "<div style='font-size:15px;font-weight:700;color:#0d2137;margin-bottom:2px'>"
+                            "Topic Intelligence</div>"
+                            "<div style='font-size:12px;color:#7f8c8d;margin-bottom:8px'>"
+                            "AI-identified topics you can click to filter the highlights below.</div>",
+                            unsafe_allow_html=True,
+                        )
+                    with _ti_btn_col:
+                        _ti_gen_btn = st.button(
+                            "✨ Generate",
+                            key="nl_ti_generate",
+                            use_container_width=True,
+                            help="Ask the AI to identify top topics across available highlights",
+                        )
+                        if st.button(
+                            "🗑 Clear", key="nl_ti_clear", use_container_width=True
+                        ):
+                            st.session_state.pop("nl_topic_topics", None)
+                            st.session_state["nl_topic_active"] = None
+                            st.rerun()
+
+                    if _ti_gen_btn:
+                        _ti_digest_lines = []
+                        for _idx, _it in enumerate(_nl_all_items):
+                            _pd = _it.get("published_date", "")
+                            _date_str = f"[{_pd[:10]}]" if _pd else ""
+                            _ti_digest_lines.append(
+                                f"{_idx}|[{_it['section']}]{_date_str} {_it['content'][:180]}"
+                            )
+                        _ti_digest = "\n".join(_ti_digest_lines[:150])
+
+                        _ti_prompt = f"""You are an endometriosis research intelligence analyst.
 Below is a numbered list of research highlights. Identify the 6-8 most meaningful and distinct topics or themes across this collection.
 
 HIGHLIGHTS:
@@ -1353,394 +1367,408 @@ Example format:
 
 Return only the JSON array, no other text."""
 
-                    with st.spinner("Identifying topics…"):
-                        try:
-                            _ti_client = _nl_make_client(_NL_DEPLOY)
+                        with st.spinner("Identifying topics…"):
                             try:
-                                _ti_resp = _ti_client.responses.create(
-                                    model=_NL_DEPLOY,
-                                    input=[{"role": "user", "content": _ti_prompt}],
-                                    max_output_tokens=800,
-                                )
-                                _ti_raw = (_ti_resp.output_text or "").strip()
-                            except Exception:
-                                _ti_resp = _ti_client.chat.completions.create(
-                                    model=_NL_DEPLOY,
-                                    messages=[{"role": "user", "content": _ti_prompt}],
-                                    max_completion_tokens=800,
-                                )
-                                _ti_raw = (
-                                    _ti_resp.choices[0].message.content or ""
-                                ).strip()
+                                _ti_client = _nl_make_client(_NL_DEPLOY)
+                                try:
+                                    _ti_resp = _ti_client.responses.create(
+                                        model=_NL_DEPLOY,
+                                        input=[{"role": "user", "content": _ti_prompt}],
+                                        max_output_tokens=800,
+                                    )
+                                    _ti_raw = (_ti_resp.output_text or "").strip()
+                                except Exception:
+                                    _ti_resp = _ti_client.chat.completions.create(
+                                        model=_NL_DEPLOY,
+                                        messages=[
+                                            {"role": "user", "content": _ti_prompt}
+                                        ],
+                                        max_completion_tokens=800,
+                                    )
+                                    _ti_raw = (
+                                        _ti_resp.choices[0].message.content or ""
+                                    ).strip()
 
-                            # Parse JSON — strip markdown fences if present
-                            if _ti_raw.startswith("```"):
-                                _ti_raw = _ti_raw.split("\n", 1)[-1]
-                            _ti_raw = _ti_raw.rstrip("`").strip()
-                            _ti_topics = json.loads(_ti_raw)
-                            st.session_state["nl_topic_topics"] = _ti_topics
-                            st.session_state["nl_topic_active"] = None
-                            st.rerun()
-                        except Exception as _ti_err:
-                            st.error(f"Topic analysis failed: {_ti_err}")
+                                # Parse JSON — strip markdown fences if present
+                                if _ti_raw.startswith("```"):
+                                    _ti_raw = _ti_raw.split("\n", 1)[-1]
+                                _ti_raw = _ti_raw.rstrip("`").strip()
+                                _ti_topics = json.loads(_ti_raw)
+                                st.session_state["nl_topic_topics"] = _ti_topics
+                                st.session_state["nl_topic_active"] = None
+                                st.rerun()
+                            except Exception as _ti_err:
+                                st.error(f"Topic analysis failed: {_ti_err}")
 
-                _ti_topics = st.session_state.get("nl_topic_topics")
-                if _ti_topics:
-                    _active_topic = st.session_state.get("nl_topic_active")
-                    # Render clickable topic chips as buttons in a row
-                    _ti_cols = st.columns(len(_ti_topics) + 1, gap="small")
-                    with _ti_cols[0]:
-                        _all_style = "primary" if _active_topic is None else "secondary"
-                        if st.button(
-                            "All",
-                            key="nl_ti_all",
-                            type=_all_style,
-                            use_container_width=True,
-                        ):
-                            st.session_state["nl_topic_active"] = None
-                            st.rerun()
-                    for _tci, _tc in enumerate(_ti_topics):
-                        with _ti_cols[_tci + 1]:
-                            _tc_style = (
-                                "primary"
-                                if _active_topic == _tc["label"]
-                                else "secondary"
+                    _ti_topics = st.session_state.get("nl_topic_topics")
+                    if _ti_topics:
+                        _active_topic = st.session_state.get("nl_topic_active")
+                        # Render clickable topic chips as buttons in a row
+                        _ti_cols = st.columns(len(_ti_topics) + 1, gap="small")
+                        with _ti_cols[0]:
+                            _all_style = (
+                                "primary" if _active_topic is None else "secondary"
                             )
                             if st.button(
-                                _tc["label"],
-                                key=f"nl_ti_topic_{_tci}",
-                                type=_tc_style,
+                                "All",
+                                key="nl_ti_all",
+                                type=_all_style,
                                 use_container_width=True,
-                                help=_tc.get("summary", ""),
                             ):
-                                st.session_state["nl_topic_active"] = (
-                                    None
-                                    if _active_topic == _tc["label"]
-                                    else _tc["label"]
-                                )
+                                st.session_state["nl_topic_active"] = None
                                 st.rerun()
+                        for _tci, _tc in enumerate(_ti_topics):
+                            with _ti_cols[_tci + 1]:
+                                _tc_style = (
+                                    "primary"
+                                    if _active_topic == _tc["label"]
+                                    else "secondary"
+                                )
+                                if st.button(
+                                    _tc["label"],
+                                    key=f"nl_ti_topic_{_tci}",
+                                    type=_tc_style,
+                                    use_container_width=True,
+                                    help=_tc.get("summary", ""),
+                                ):
+                                    st.session_state["nl_topic_active"] = (
+                                        None
+                                        if _active_topic == _tc["label"]
+                                        else _tc["label"]
+                                    )
+                                    st.rerun()
 
-                    # Show summary for active topic
-                    if _active_topic:
-                        _active_tc = next(
-                            (t for t in _ti_topics if t["label"] == _active_topic), None
-                        )
-                        if _active_tc:
-                            st.markdown(
-                                f"<div style='background:#e8f4fd;border-left:3px solid #1a7fb5;"
-                                f"border-radius:4px;padding:8px 14px;margin:8px 0 4px 0;"
-                                f"font-size:13px;color:#0d3349'>"
-                                f"<strong>{_active_tc['label']}</strong> — {_active_tc['summary']}"
-                                f"</div>",
-                                unsafe_allow_html=True,
+                        # Show summary for active topic
+                        if _active_topic:
+                            _active_tc = next(
+                                (t for t in _ti_topics if t["label"] == _active_topic),
+                                None,
                             )
-                            # Apply keyword filter to items
-                            _kws = [k.lower() for k in _active_tc.get("keywords", [])]
-                            _nl_all_items = [
-                                it
-                                for it in _nl_all_items
-                                if any(kw in it["content"].lower() for kw in _kws)
-                            ]
-                else:
+                            if _active_tc:
+                                st.markdown(
+                                    f"<div style='background:#e8f4fd;border-left:3px solid #1a7fb5;"
+                                    f"border-radius:4px;padding:8px 14px;margin:8px 0 4px 0;"
+                                    f"font-size:13px;color:#0d3349'>"
+                                    f"<strong>{_active_tc['label']}</strong> — {_active_tc['summary']}"
+                                    f"</div>",
+                                    unsafe_allow_html=True,
+                                )
+                                # Apply keyword filter to items
+                                _kws = [
+                                    k.lower() for k in _active_tc.get("keywords", [])
+                                ]
+                                _nl_all_items = [
+                                    it
+                                    for it in _nl_all_items
+                                    if any(kw in it["content"].lower() for kw in _kws)
+                                ]
+                    else:
+                        st.markdown(
+                            "<div style='background:#f8faff;border:1px dashed #b8d9f0;"
+                            "border-radius:6px;padding:10px 16px;margin-bottom:12px;"
+                            "font-size:13px;color:#7f8c8d'>"
+                            "Click <strong>✨ Generate</strong> — the AI will identify top topics "
+                            "you can click to filter the highlights below."
+                            "</div>",
+                            unsafe_allow_html=True,
+                        )
+
+                # ── Highlight picker ───────────────────────────────
+                _ph_hdr_col, _ph_filter_col = st.columns([4, 2], gap="medium")
+                with _ph_hdr_col:
                     st.markdown(
-                        "<div style='background:#f8faff;border:1px dashed #b8d9f0;"
-                        "border-radius:6px;padding:10px 16px;margin-bottom:12px;"
-                        "font-size:13px;color:#7f8c8d'>"
-                        "Click <strong>✨ Generate</strong> — the AI will identify top topics "
-                        "you can click to filter the highlights below."
-                        "</div>",
+                        f"#### Select Highlights &nbsp;"
+                        f"<span style='font-size:13px;color:#7f8c8d'>"
+                        f"{len(_nl_all_items)} items available</span>",
                         unsafe_allow_html=True,
                     )
-
-            # ── Highlight picker ───────────────────────────────
-            _ph_hdr_col, _ph_filter_col = st.columns([4, 2], gap="medium")
-            with _ph_hdr_col:
-                st.markdown(
-                    f"#### Select Highlights &nbsp;"
-                    f"<span style='font-size:13px;color:#7f8c8d'>"
-                    f"{len(_nl_all_items)} items available</span>",
-                    unsafe_allow_html=True,
-                )
-            with _ph_filter_col:
-                st.markdown("<div style='margin-top:28px'>", unsafe_allow_html=True)
-                _nl_pub_date_only = st.checkbox(
-                    "Published dates only",
-                    value=st.session_state.get("nl_pub_date_only", False),
-                    key="nl_pub_date_only_inline",
-                    help="Hide highlights that only have a Run date — show only items with a known article publish date",
-                )
-                if _nl_pub_date_only != st.session_state.get("nl_pub_date_only", False):
-                    st.session_state["nl_pub_date_only"] = _nl_pub_date_only
-                    st.rerun()
-                st.markdown("</div>", unsafe_allow_html=True)
-
-            if not _nl_all_items:
-                st.info(
-                    "No highlights found. Generate an AI Search briefing or RAG briefing first, "
-                    "or adjust the date range / source filter above."
-                )
-            else:
-                _sel_col, _act_col = st.columns([6, 1])
-                with _act_col:
-                    if st.button(
-                        "Select all", use_container_width=True, key="nl_sel_all"
+                with _ph_filter_col:
+                    st.markdown("<div style='margin-top:28px'>", unsafe_allow_html=True)
+                    _nl_pub_date_only = st.checkbox(
+                        "Published dates only",
+                        value=st.session_state.get("nl_pub_date_only", False),
+                        key="nl_pub_date_only_inline",
+                        help="Hide highlights that only have a Run date — show only items with a known article publish date",
+                    )
+                    if _nl_pub_date_only != st.session_state.get(
+                        "nl_pub_date_only", False
                     ):
-                        st.session_state["nl_selected_ids"] = {
-                            it["id"] for it in _nl_all_items
-                        }
+                        st.session_state["nl_pub_date_only"] = _nl_pub_date_only
                         st.rerun()
-                    if st.button(
-                        "Clear all", use_container_width=True, key="nl_clr_all"
-                    ):
-                        st.session_state["nl_selected_ids"] = set()
-                        st.rerun()
+                    st.markdown("</div>", unsafe_allow_html=True)
 
-                _nl_by_section: Dict[str, List[Dict]] = {}
-                for _it in _nl_all_items:
-                    _nl_by_section.setdefault(_it["section"], []).append(_it)
+                if not _nl_all_items:
+                    st.info(
+                        "No highlights found. Generate an AI Search briefing or RAG briefing first, "
+                        "or adjust the date range / source filter above."
+                    )
+                else:
+                    _sel_col, _act_col = st.columns([6, 1])
+                    with _act_col:
+                        if st.button(
+                            "Select all", use_container_width=True, key="nl_sel_all"
+                        ):
+                            st.session_state["nl_selected_ids"] = {
+                                it["id"] for it in _nl_all_items
+                            }
+                            st.rerun()
+                        if st.button(
+                            "Clear all", use_container_width=True, key="nl_clr_all"
+                        ):
+                            st.session_state["nl_selected_ids"] = set()
+                            st.rerun()
 
-                for _sec, _sec_items in _nl_by_section.items():
-                    with st.expander(
-                        f"{_sec} ({len(_sec_items)} items)", expanded=True
-                    ):
-                        _gc1, _gc2 = st.columns(2, gap="medium")
-                        for _ci, _it in enumerate(_sec_items):
-                            with _gc1 if _ci % 2 == 0 else _gc2:
-                                _checked = (
-                                    _it["id"] in st.session_state["nl_selected_ids"]
-                                )
-                                _preview = _it["content"][:180] + (
-                                    "…" if len(_it["content"]) > 180 else ""
-                                )
-                                _new_checked = st.checkbox(
-                                    f"{'✓ ' if _checked else ''}{_preview}",
-                                    value=_checked,
-                                    key=f"nl_chk_{_it['id']}",
-                                    help=f"{_it['source_type']} · Run {_it['run_id']} · {_it['run_ts']}",
-                                )
-                                _pub_raw = _it.get("published_date", "")
-                                if _pub_raw:
-                                    try:
-                                        _date_label = "Published: " + datetime.strptime(
-                                            _pub_raw[:10], "%Y-%m-%d"
-                                        ).strftime("%m-%d-%Y")
-                                    except Exception:
-                                        _date_label = f"Published: {_pub_raw[:10]}"
-                                else:
-                                    try:
-                                        _date_label = "Run: " + datetime.strptime(
-                                            _it["run_ts"][:10], "%Y-%m-%d"
-                                        ).strftime("%m-%d-%Y")
-                                    except Exception:
-                                        _date_label = f"Run: {_it['run_ts'][:10]}"
-                                _it_url = _it.get("url", "")
-                                _link_md = (
-                                    f" &nbsp;·&nbsp; [View source]({_it_url})"
-                                    if _it_url
-                                    else ""
-                                )
-                                st.caption(
-                                    f"📅 {_date_label} &nbsp;·&nbsp; {_it['source_type']}{_link_md}"
-                                )
-                                if _new_checked != _checked:
-                                    if _new_checked:
-                                        st.session_state["nl_selected_ids"].add(
-                                            _it["id"]
-                                        )
+                    _nl_by_section: Dict[str, List[Dict]] = {}
+                    for _it in _nl_all_items:
+                        _nl_by_section.setdefault(_it["section"], []).append(_it)
+
+                    for _sec, _sec_items in _nl_by_section.items():
+                        with st.expander(
+                            f"{_sec} ({len(_sec_items)} items)", expanded=True
+                        ):
+                            _gc1, _gc2 = st.columns(2, gap="medium")
+                            for _ci, _it in enumerate(_sec_items):
+                                with _gc1 if _ci % 2 == 0 else _gc2:
+                                    _checked = (
+                                        _it["id"] in st.session_state["nl_selected_ids"]
+                                    )
+                                    _preview = _it["content"][:180] + (
+                                        "…" if len(_it["content"]) > 180 else ""
+                                    )
+                                    _new_checked = st.checkbox(
+                                        f"{'✓ ' if _checked else ''}{_preview}",
+                                        value=_checked,
+                                        key=f"nl_chk_{_it['id']}",
+                                        help=f"{_it['source_type']} · Run {_it['run_id']} · {_it['run_ts']}",
+                                    )
+                                    _pub_raw = _it.get("published_date", "")
+                                    if _pub_raw:
+                                        try:
+                                            _date_label = (
+                                                "Published: "
+                                                + datetime.strptime(
+                                                    _pub_raw[:10], "%Y-%m-%d"
+                                                ).strftime("%m-%d-%Y")
+                                            )
+                                        except Exception:
+                                            _date_label = f"Published: {_pub_raw[:10]}"
                                     else:
-                                        st.session_state["nl_selected_ids"].discard(
-                                            _it["id"]
-                                        )
+                                        try:
+                                            _date_label = "Run: " + datetime.strptime(
+                                                _it["run_ts"][:10], "%Y-%m-%d"
+                                            ).strftime("%m-%d-%Y")
+                                        except Exception:
+                                            _date_label = f"Run: {_it['run_ts'][:10]}"
+                                    _it_url = _it.get("url", "")
+                                    _link_md = (
+                                        f" &nbsp;·&nbsp; [View source]({_it_url})"
+                                        if _it_url
+                                        else ""
+                                    )
+                                    st.caption(
+                                        f"📅 {_date_label} &nbsp;·&nbsp; {_it['source_type']}{_link_md}"
+                                    )
+                                    if _new_checked != _checked:
+                                        if _new_checked:
+                                            st.session_state["nl_selected_ids"].add(
+                                                _it["id"]
+                                            )
+                                        else:
+                                            st.session_state["nl_selected_ids"].discard(
+                                                _it["id"]
+                                            )
 
-                _n_sel = len(st.session_state["nl_selected_ids"])
+                    _n_sel = len(st.session_state["nl_selected_ids"])
+                    st.markdown(
+                        f"<div style='margin:12px 0 8px 0;font-size:13px;color:#7f8c8d'>"
+                        f"<strong style='color:#0a2540'>{_n_sel}</strong> highlight(s) selected</div>",
+                        unsafe_allow_html=True,
+                    )
+
+                st.markdown("---")
+                if st.button(
+                    "📰 Go to Newsletter Builder →",
+                    type="primary",
+                    use_container_width=False,
+                    key="nl_goto_builder",
+                    disabled=len(st.session_state.get("nl_selected_ids", set())) == 0,
+                ):
+                    st.session_state["nl_view"] = "builder"
+                    st.rerun()
+
+            # ════════════════════════════════════════════════════
+            # VIEW 2 — Newsletter Builder
+            # ════════════════════════════════════════════════════
+            elif _nl_view == "builder":
+
+                # ── Quick send bar ─────────────────────────────────
+                _nl_smtp_b = load_smtp_config()
+                _nl_recips_all = load_recipients()
+                _nl_recips_nl = [
+                    r
+                    for r in _nl_recips_all
+                    if r.get("subscription_type", "briefing") in ("newsletter", "both")
+                ]
+                _nl_draft_ready = bool(st.session_state.get("nl_draft", "").strip())
+                _nl_saved_id_b = st.session_state.get("nl_saved_id")
+
+                _pending_id = get_nl_config("pending_newsletter_id", "")
+
+                _qs_c1, _qs_c2, _qs_c3 = st.columns([3, 3, 2], gap="medium")
+                with _qs_c1:
+                    _qs_send = st.button(
+                        "📤 Email to Mailing List Now",
+                        use_container_width=True,
+                        disabled=(
+                            not _nl_draft_ready
+                            or _nl_smtp_b is None
+                            or not _nl_recips_nl
+                        ),
+                        key="nl_qs_send",
+                        help=(
+                            "No newsletter subscribers on mailing list."
+                            if not _nl_recips_nl
+                            else (
+                                "SMTP not configured."
+                                if _nl_smtp_b is None
+                                else f"Send to {len(_nl_recips_nl)} newsletter subscriber(s) now"
+                            )
+                        ),
+                    )
+                with _qs_c2:
+                    _qs_queue = st.button(
+                        "🕐 Schedule with Next Daily Briefing",
+                        use_container_width=True,
+                        disabled=not _nl_draft_ready,
+                        key="nl_qs_queue",
+                        help="Queues this newsletter to send as a separate email alongside the next scheduled daily briefing",
+                    )
+                with _qs_c3:
+                    if _pending_id:
+                        st.markdown(
+                            f"<div style='background:#fff8e1;border:1px solid #f9c74f;"
+                            f"border-radius:6px;padding:8px 12px;font-size:12px;color:#7d5a00'>"
+                            f"⏳ Newsletter #{_pending_id} queued</div>",
+                            unsafe_allow_html=True,
+                        )
+                    else:
+                        st.markdown(
+                            "<div style='background:#f0f4f8;border:1px solid #dce3ec;"
+                            "border-radius:6px;padding:8px 12px;font-size:12px;color:#7f8c8d'>"
+                            "No newsletter queued</div>",
+                            unsafe_allow_html=True,
+                        )
+
+                if _qs_send and _nl_draft_ready:
+                    if not _nl_smtp_b:
+                        st.error("SMTP not configured.")
+                    elif not _nl_recips_nl:
+                        st.warning(
+                            "No recipients subscribed to Newsletter. Update subscriptions in Report Config."
+                        )
+                    else:
+                        _qs_title = _nl_title or "Endometriosis Newsletter"
+                        _qs_subject = f"Evidence Gap — {_qs_title}"
+                        _qs_meta = (
+                            f"Endometriosis Newsletter · "
+                            f"Sent {datetime.now(timezone.utc).strftime('%B %d, %Y %H:%M UTC')}"
+                        )
+                        _qs_ok, _qs_fail = [], []
+                        _qs_prog = st.progress(0, text="Sending…")
+                        for _qs_i, _qs_r in enumerate(_nl_recips_nl):
+                            try:
+                                send_briefing(
+                                    to_addr=_qs_r["email"],
+                                    subject=_qs_subject,
+                                    title=_qs_title,
+                                    meta=_qs_meta,
+                                    briefing_md=st.session_state["nl_draft"],
+                                )
+                                mark_recipient_sent(_qs_r["id"])
+                                _qs_ok.append(f"{_qs_r['name']} <{_qs_r['email']}>")
+                            except Exception as _qs_e:
+                                _qs_fail.append(f"{_qs_r['name']} — {_qs_e}")
+                            _qs_prog.progress(
+                                (_qs_i + 1) / len(_nl_recips_nl),
+                                text=f"{_qs_i + 1}/{len(_nl_recips_nl)} sent…",
+                            )
+                        _qs_prog.empty()
+                        if _qs_ok:
+                            st.success(
+                                f"✅ Sent to {len(_qs_ok)} recipient(s): "
+                                + ", ".join(_qs_ok)
+                            )
+                        if _qs_fail:
+                            st.error("❌ Failed: " + ", ".join(_qs_fail))
+
+                if _qs_queue and _nl_draft_ready:
+                    # Save draft first if not yet saved
+                    if not _nl_saved_id_b:
+                        _qs_sid = save_newsletter(
+                            title=_nl_title or "Endometriosis Newsletter",
+                            coverage_period=_nl_period or "Recent",
+                            content_md=st.session_state["nl_draft"],
+                            sources=[],
+                            config={},
+                        )
+                        st.session_state["nl_saved_id"] = _qs_sid
+                        _nl_saved_id_b = _qs_sid
+                    set_nl_config("pending_newsletter_id", str(_nl_saved_id_b))
+                    _send_time = get_nl_config("daily_send_time", "07:00")
+                    st.success(
+                        f"✅ Newsletter #{_nl_saved_id_b} scheduled — will be sent as a separate "
+                        f"email at the next daily send ({_send_time} local time)."
+                    )
+                    st.rerun()
+
+                st.markdown("---")
+
+                # ── Generate newsletter ────────────────────────────
+                _n_sel_b = len(st.session_state.get("nl_selected_ids", set()))
                 st.markdown(
-                    f"<div style='margin:12px 0 8px 0;font-size:13px;color:#7f8c8d'>"
-                    f"<strong style='color:#0a2540'>{_n_sel}</strong> highlight(s) selected</div>",
+                    f"<div style='font-size:13px;color:#7f8c8d;margin-bottom:12px'>"
+                    f"<strong style='color:#0a2540'>{_n_sel_b}</strong> highlight(s) selected — "
+                    f"<a href='#' style='color:#1a7fb5'>go back to Select Highlights to change</a></div>",
                     unsafe_allow_html=True,
                 )
 
-            st.markdown("---")
-            if st.button(
-                "📰 Go to Newsletter Builder →",
-                type="primary",
-                use_container_width=False,
-                key="nl_goto_builder",
-                disabled=len(st.session_state.get("nl_selected_ids", set())) == 0,
-            ):
-                st.session_state["nl_view"] = "builder"
-                st.rerun()
+                _nl_gen_btn = st.button(
+                    "📰 Generate Newsletter",
+                    type="primary",
+                    disabled=_n_sel_b == 0,
+                    key="nl_generate",
+                )
 
-        # ════════════════════════════════════════════════════
-        # VIEW 2 — Newsletter Builder
-        # ════════════════════════════════════════════════════
-        elif _nl_view == "builder":
+                if _nl_gen_btn:
+                    _sel_ids = st.session_state.get("nl_selected_ids", set())
+                    _sel_items = [it for it in _nl_all_items if it["id"] in _sel_ids]
 
-            # ── Quick send bar ─────────────────────────────────
-            _nl_smtp_b = load_smtp_config()
-            _nl_recips_all = load_recipients()
-            _nl_recips_nl = [
-                r
-                for r in _nl_recips_all
-                if r.get("subscription_type", "briefing") in ("newsletter", "both")
-            ]
-            _nl_draft_ready = bool(st.session_state.get("nl_draft", "").strip())
-            _nl_saved_id_b = st.session_state.get("nl_saved_id")
+                    _ref_pool: List[str] = []
+                    _seen_run_ids: set = set()
+                    for _r in _nl_ai_runs + _nl_rag_runs:
+                        _bt = _r.get("briefing_text") or ""
+                        _rid = f"{_r.get('topic','rag')}_{_r['id']}"
+                        if _bt and _rid not in _seen_run_ids:
+                            _ref_pool.extend(_extract_references(_bt))
+                            _seen_run_ids.add(_rid)
 
-            _pending_id = get_nl_config("pending_newsletter_id", "")
-
-            _qs_c1, _qs_c2, _qs_c3 = st.columns([3, 3, 2], gap="medium")
-            with _qs_c1:
-                _qs_send = st.button(
-                    "📤 Email to Mailing List Now",
-                    use_container_width=True,
-                    disabled=(
-                        not _nl_draft_ready or _nl_smtp_b is None or not _nl_recips_nl
-                    ),
-                    key="nl_qs_send",
-                    help=(
-                        "No newsletter subscribers on mailing list."
-                        if not _nl_recips_nl
-                        else (
-                            "SMTP not configured."
-                            if _nl_smtp_b is None
-                            else f"Send to {len(_nl_recips_nl)} newsletter subscriber(s) now"
+                    _sel_by_section: Dict[str, List[str]] = {}
+                    for _it in _sel_items:
+                        _sel_by_section.setdefault(_it["section"], []).append(
+                            f"[{_it['source_type']} · {_it['filter_label']}] {_it['content']}"
                         )
-                    ),
-                )
-            with _qs_c2:
-                _qs_queue = st.button(
-                    "🕐 Schedule with Next Daily Briefing",
-                    use_container_width=True,
-                    disabled=not _nl_draft_ready,
-                    key="nl_qs_queue",
-                    help="Queues this newsletter to send as a separate email alongside the next scheduled daily briefing",
-                )
-            with _qs_c3:
-                if _pending_id:
-                    st.markdown(
-                        f"<div style='background:#fff8e1;border:1px solid #f9c74f;"
-                        f"border-radius:6px;padding:8px 12px;font-size:12px;color:#7d5a00'>"
-                        f"⏳ Newsletter #{_pending_id} queued</div>",
-                        unsafe_allow_html=True,
+
+                    _highlights_block = "\n\n".join(
+                        f"### {sec}\n" + "\n".join(f"- {c}" for c in items)
+                        for sec, items in _sel_by_section.items()
                     )
-                else:
-                    st.markdown(
-                        "<div style='background:#f0f4f8;border:1px solid #dce3ec;"
-                        "border-radius:6px;padding:8px 12px;font-size:12px;color:#7f8c8d'>"
-                        "No newsletter queued</div>",
-                        unsafe_allow_html=True,
+                    _refs_block = (
+                        "\n".join(_ref_pool[:40])
+                        if _ref_pool
+                        else "(No references extracted)"
                     )
 
-            if _qs_send and _nl_draft_ready:
-                if not _nl_smtp_b:
-                    st.error("SMTP not configured.")
-                elif not _nl_recips_nl:
-                    st.warning(
-                        "No recipients subscribed to Newsletter. Update subscriptions in Report Config."
-                    )
-                else:
-                    _qs_title = _nl_title or "Endometriosis Newsletter"
-                    _qs_subject = f"Evidence Gap — {_qs_title}"
-                    _qs_meta = (
-                        f"Endometriosis Newsletter · "
-                        f"Sent {datetime.now(timezone.utc).strftime('%B %d, %Y %H:%M UTC')}"
-                    )
-                    _qs_ok, _qs_fail = [], []
-                    _qs_prog = st.progress(0, text="Sending…")
-                    for _qs_i, _qs_r in enumerate(_nl_recips_nl):
-                        try:
-                            send_briefing(
-                                to_addr=_qs_r["email"],
-                                subject=_qs_subject,
-                                title=_qs_title,
-                                meta=_qs_meta,
-                                briefing_md=st.session_state["nl_draft"],
-                            )
-                            mark_recipient_sent(_qs_r["id"])
-                            _qs_ok.append(f"{_qs_r['name']} <{_qs_r['email']}>")
-                        except Exception as _qs_e:
-                            _qs_fail.append(f"{_qs_r['name']} — {_qs_e}")
-                        _qs_prog.progress(
-                            (_qs_i + 1) / len(_nl_recips_nl),
-                            text=f"{_qs_i + 1}/{len(_nl_recips_nl)} sent…",
-                        )
-                    _qs_prog.empty()
-                    if _qs_ok:
-                        st.success(
-                            f"✅ Sent to {len(_qs_ok)} recipient(s): "
-                            + ", ".join(_qs_ok)
-                        )
-                    if _qs_fail:
-                        st.error("❌ Failed: " + ", ".join(_qs_fail))
-
-            if _qs_queue and _nl_draft_ready:
-                # Save draft first if not yet saved
-                if not _nl_saved_id_b:
-                    _qs_sid = save_newsletter(
-                        title=_nl_title or "Endometriosis Newsletter",
-                        coverage_period=_nl_period or "Recent",
-                        content_md=st.session_state["nl_draft"],
-                        sources=[],
-                        config={},
-                    )
-                    st.session_state["nl_saved_id"] = _qs_sid
-                    _nl_saved_id_b = _qs_sid
-                set_nl_config("pending_newsletter_id", str(_nl_saved_id_b))
-                _send_time = get_nl_config("daily_send_time", "07:00")
-                st.success(
-                    f"✅ Newsletter #{_nl_saved_id_b} scheduled — will be sent as a separate "
-                    f"email at the next daily send ({_send_time} local time)."
-                )
-                st.rerun()
-
-            st.markdown("---")
-
-            # ── Generate newsletter ────────────────────────────
-            _n_sel_b = len(st.session_state.get("nl_selected_ids", set()))
-            st.markdown(
-                f"<div style='font-size:13px;color:#7f8c8d;margin-bottom:12px'>"
-                f"<strong style='color:#0a2540'>{_n_sel_b}</strong> highlight(s) selected — "
-                f"<a href='#' style='color:#1a7fb5'>go back to Select Highlights to change</a></div>",
-                unsafe_allow_html=True,
-            )
-
-            _nl_gen_btn = st.button(
-                "📰 Generate Newsletter",
-                type="primary",
-                disabled=_n_sel_b == 0,
-                key="nl_generate",
-            )
-
-            if _nl_gen_btn:
-                _sel_ids = st.session_state.get("nl_selected_ids", set())
-                _sel_items = [it for it in _nl_all_items if it["id"] in _sel_ids]
-
-                _ref_pool: List[str] = []
-                _seen_run_ids: set = set()
-                for _r in _nl_ai_runs + _nl_rag_runs:
-                    _bt = _r.get("briefing_text") or ""
-                    _rid = f"{_r.get('topic','rag')}_{_r['id']}"
-                    if _bt and _rid not in _seen_run_ids:
-                        _ref_pool.extend(_extract_references(_bt))
-                        _seen_run_ids.add(_rid)
-
-                _sel_by_section: Dict[str, List[str]] = {}
-                for _it in _sel_items:
-                    _sel_by_section.setdefault(_it["section"], []).append(
-                        f"[{_it['source_type']} · {_it['filter_label']}] {_it['content']}"
-                    )
-
-                _highlights_block = "\n\n".join(
-                    f"### {sec}\n" + "\n".join(f"- {c}" for c in items)
-                    for sec, items in _sel_by_section.items()
-                )
-                _refs_block = (
-                    "\n".join(_ref_pool[:40])
-                    if _ref_pool
-                    else "(No references extracted)"
-                )
-
-                _nl_user_msg = f"""Produce a professional endometriosis intelligence newsletter using ONLY the selected highlights below.
+                    _nl_user_msg = f"""Produce a professional endometriosis intelligence newsletter using ONLY the selected highlights below.
 
 NEWSLETTER CONFIG:
 - Title: {_nl_title}
@@ -1805,427 +1833,441 @@ For each finding, write a standalone paragraph block — no bullet dashes. Follo
 [List every [N] cited inline: [N] Title. Source. Date. URL]
 """
 
-                _nl_pbar = st.progress(0, text="Generating newsletter…")
-                try:
-                    _nl_client = _nl_make_client(_NL_DEPLOY)
-                    _nl_pbar.progress(20, text="Sending to model…")
+                    _nl_pbar = st.progress(0, text="Generating newsletter…")
                     try:
-                        _nl_resp = _nl_client.responses.create(
-                            model=_NL_DEPLOY,
-                            input=[
-                                {"role": "system", "content": _NL_SYSTEM},
-                                {"role": "user", "content": _nl_user_msg},
-                            ],
-                            max_output_tokens=4000,
-                        )
-                        _nl_text = (_nl_resp.output_text or "").strip()
-                    except Exception:
-                        _nl_resp = _nl_client.chat.completions.create(
-                            model=_NL_DEPLOY,
-                            messages=[
-                                {"role": "system", "content": _NL_SYSTEM},
-                                {"role": "user", "content": _nl_user_msg},
-                            ],
-                            max_completion_tokens=4000,
-                        )
-                        _nl_text = (_nl_resp.choices[0].message.content or "").strip()
+                        _nl_client = _nl_make_client(_NL_DEPLOY)
+                        _nl_pbar.progress(20, text="Sending to model…")
+                        try:
+                            _nl_resp = _nl_client.responses.create(
+                                model=_NL_DEPLOY,
+                                input=[
+                                    {"role": "system", "content": _NL_SYSTEM},
+                                    {"role": "user", "content": _nl_user_msg},
+                                ],
+                                max_output_tokens=4000,
+                            )
+                            _nl_text = (_nl_resp.output_text or "").strip()
+                        except Exception:
+                            _nl_resp = _nl_client.chat.completions.create(
+                                model=_NL_DEPLOY,
+                                messages=[
+                                    {"role": "system", "content": _NL_SYSTEM},
+                                    {"role": "user", "content": _nl_user_msg},
+                                ],
+                                max_completion_tokens=4000,
+                            )
+                            _nl_text = (
+                                _nl_resp.choices[0].message.content or ""
+                            ).strip()
 
-                    _nl_pbar.progress(90, text="Saving draft…")
-                    _nl_sources = [
-                        {
-                            "content": it["content"],
-                            "source_type": it["source_type"],
-                            "section": it["section"],
-                        }
-                        for it in _sel_items
-                    ]
-                    _nl_sid = save_newsletter(
-                        title=_nl_title,
-                        coverage_period=_nl_period or "Recent",
-                        content_md=_nl_text,
-                        sources=_nl_sources,
-                        config={
-                            "custom_note": _nl_custom_note,
-                            "source_sel": _nl_source_sel,
-                        },
-                    )
-                    st.session_state["nl_draft"] = _nl_text
-                    st.session_state["nl_saved_id"] = _nl_sid
-                    st.session_state["nl_undo_stack"] = []
-                    _nl_pbar.progress(100, text="Done")
-                    _nl_pbar.empty()
-                    st.rerun()
-                except Exception as _nl_gen_err:
-                    _nl_pbar.empty()
-                    st.error(f"Generation failed: {_nl_gen_err}")
-
-            # ── Editor + Preview ───────────────────────────────
-            if st.session_state.get("nl_draft"):
-                st.markdown("---")
-                st.markdown("#### Draft Newsletter")
-
-                _ed_col, _prev_col = st.columns([1, 1], gap="large")
-
-                with _ed_col:
-                    st.markdown(
-                        "<div style='font-size:11px;text-transform:uppercase;"
-                        "letter-spacing:.07em;color:#7f8c8d;margin-bottom:4px'>Edit</div>",
-                        unsafe_allow_html=True,
-                    )
-
-                    # ── Markdown formatting toolbar ────────────────
-                    with st.expander("🖊 Formatting Toolbar", expanded=False):
-                        st.caption(
-                            "Type a phrase below and click a format button to apply it in the draft, "
-                            "or use the Insert buttons to add new elements."
-                        )
-                        _ft_phrase = st.text_input(
-                            "Phrase to format (must exist in draft)",
-                            key="ft_phrase",
-                            placeholder="e.g. Key finding here",
-                        )
-                        _ft_cols = st.columns(7, gap="small")
-                        _ft_apply_formats = [
-                            ("Bold", "**", "**"),
-                            ("Italic", "*", "*"),
-                            ("H1", "# ", ""),
-                            ("H2", "## ", ""),
-                            ("H3", "### ", ""),
-                            ("`Code`", "`", "`"),
-                            ("~~Strike~~", "~~", "~~"),
+                        _nl_pbar.progress(90, text="Saving draft…")
+                        _nl_sources = [
+                            {
+                                "content": it["content"],
+                                "source_type": it["source_type"],
+                                "section": it["section"],
+                            }
+                            for it in _sel_items
                         ]
-                        for _fi, (_flabel, _fpre, _fpost) in enumerate(
-                            _ft_apply_formats
-                        ):
-                            with _ft_cols[_fi]:
-                                if st.button(
-                                    _flabel,
-                                    key=f"ft_apply_{_fi}",
-                                    use_container_width=True,
-                                ):
-                                    if (
-                                        _ft_phrase
-                                        and _ft_phrase in st.session_state["nl_draft"]
+                        _nl_sid = save_newsletter(
+                            title=_nl_title,
+                            coverage_period=_nl_period or "Recent",
+                            content_md=_nl_text,
+                            sources=_nl_sources,
+                            config={
+                                "custom_note": _nl_custom_note,
+                                "source_sel": _nl_source_sel,
+                            },
+                        )
+                        st.session_state["nl_draft"] = _nl_text
+                        st.session_state["nl_saved_id"] = _nl_sid
+                        st.session_state["nl_undo_stack"] = []
+                        _nl_pbar.progress(100, text="Done")
+                        _nl_pbar.empty()
+                        st.rerun()
+                    except Exception as _nl_gen_err:
+                        _nl_pbar.empty()
+                        st.error(f"Generation failed: {_nl_gen_err}")
+
+                # ── Editor + Preview ───────────────────────────────
+                if st.session_state.get("nl_draft"):
+                    st.markdown("---")
+                    st.markdown("#### Draft Newsletter")
+
+                    _ed_col, _prev_col = st.columns([1, 1], gap="large")
+
+                    with _ed_col:
+                        st.markdown(
+                            "<div style='font-size:11px;text-transform:uppercase;"
+                            "letter-spacing:.07em;color:#7f8c8d;margin-bottom:4px'>Edit</div>",
+                            unsafe_allow_html=True,
+                        )
+
+                        # ── Markdown formatting toolbar ────────────────
+                        with st.expander("🖊 Formatting Toolbar", expanded=False):
+                            st.caption(
+                                "Type a phrase below and click a format button to apply it in the draft, "
+                                "or use the Insert buttons to add new elements."
+                            )
+                            _ft_phrase = st.text_input(
+                                "Phrase to format (must exist in draft)",
+                                key="ft_phrase",
+                                placeholder="e.g. Key finding here",
+                            )
+                            _ft_cols = st.columns(7, gap="small")
+                            _ft_apply_formats = [
+                                ("Bold", "**", "**"),
+                                ("Italic", "*", "*"),
+                                ("H1", "# ", ""),
+                                ("H2", "## ", ""),
+                                ("H3", "### ", ""),
+                                ("`Code`", "`", "`"),
+                                ("~~Strike~~", "~~", "~~"),
+                            ]
+                            for _fi, (_flabel, _fpre, _fpost) in enumerate(
+                                _ft_apply_formats
+                            ):
+                                with _ft_cols[_fi]:
+                                    if st.button(
+                                        _flabel,
+                                        key=f"ft_apply_{_fi}",
+                                        use_container_width=True,
+                                    ):
+                                        if (
+                                            _ft_phrase
+                                            and _ft_phrase
+                                            in st.session_state["nl_draft"]
+                                        ):
+                                            st.session_state["nl_undo_stack"].append(
+                                                st.session_state["nl_draft"]
+                                            )
+                                            if _fpre in ("# ", "## ", "### "):
+                                                # heading: prepend to line containing phrase
+                                                _lines = st.session_state[
+                                                    "nl_draft"
+                                                ].splitlines()
+                                                _new_lines = []
+                                                for _ln in _lines:
+                                                    if (
+                                                        _ft_phrase in _ln
+                                                        and not _ln.startswith("#")
+                                                    ):
+                                                        _new_lines.append(
+                                                            _fpre + _ln.lstrip("# ")
+                                                        )
+                                                    else:
+                                                        _new_lines.append(_ln)
+                                                st.session_state["nl_draft"] = (
+                                                    "\n".join(_new_lines)
+                                                )
+                                            else:
+                                                st.session_state[
+                                                    "nl_draft"
+                                                ] = st.session_state[
+                                                    "nl_draft"
+                                                ].replace(
+                                                    _ft_phrase,
+                                                    f"{_fpre}{_ft_phrase}{_fpost}",
+                                                    1,
+                                                )
+                                            if st.session_state.get("nl_saved_id"):
+                                                update_newsletter(
+                                                    st.session_state["nl_saved_id"],
+                                                    st.session_state["nl_draft"],
+                                                )
+                                            st.rerun()
+                                        elif _ft_phrase:
+                                            st.warning("Phrase not found in draft.")
+
+                            st.markdown(
+                                "<div style='margin-top:8px;font-size:12px;color:#7f8c8d'>Insert at end of draft:</div>",
+                                unsafe_allow_html=True,
+                            )
+                            _ins_cols = st.columns(6, gap="small")
+                            _ins_items = [
+                                ("— HR", "\n\n---\n\n"),
+                                ("• Bullet", "\n- New item"),
+                                ("1. List", "\n1. New item"),
+                                ("# H1", "\n\n# New Section"),
+                                ("## H2", "\n\n## New Section"),
+                                ("🔗 Link", "\n[Link text](https://example.com)"),
+                            ]
+                            for _ii, (_ilabel, _itext) in enumerate(_ins_items):
+                                with _ins_cols[_ii]:
+                                    if st.button(
+                                        _ilabel,
+                                        key=f"ft_ins_{_ii}",
+                                        use_container_width=True,
                                     ):
                                         st.session_state["nl_undo_stack"].append(
                                             st.session_state["nl_draft"]
                                         )
-                                        if _fpre in ("# ", "## ", "### "):
-                                            # heading: prepend to line containing phrase
-                                            _lines = st.session_state[
-                                                "nl_draft"
-                                            ].splitlines()
-                                            _new_lines = []
-                                            for _ln in _lines:
-                                                if (
-                                                    _ft_phrase in _ln
-                                                    and not _ln.startswith("#")
-                                                ):
-                                                    _new_lines.append(
-                                                        _fpre + _ln.lstrip("# ")
-                                                    )
-                                                else:
-                                                    _new_lines.append(_ln)
-                                            st.session_state["nl_draft"] = "\n".join(
-                                                _new_lines
-                                            )
-                                        else:
-                                            st.session_state[
-                                                "nl_draft"
-                                            ] = st.session_state["nl_draft"].replace(
-                                                _ft_phrase,
-                                                f"{_fpre}{_ft_phrase}{_fpost}",
-                                                1,
-                                            )
+                                        st.session_state["nl_draft"] += _itext
                                         if st.session_state.get("nl_saved_id"):
                                             update_newsletter(
                                                 st.session_state["nl_saved_id"],
                                                 st.session_state["nl_draft"],
                                             )
                                         st.rerun()
-                                    elif _ft_phrase:
-                                        st.warning("Phrase not found in draft.")
 
+                        _edited = st.text_area(
+                            "newsletter_editor",
+                            value=st.session_state["nl_draft"],
+                            height=900,
+                            label_visibility="collapsed",
+                            key="nl_editor_area",
+                        )
+                        if _edited != st.session_state["nl_draft"]:
+                            st.session_state["nl_undo_stack"].append(
+                                st.session_state["nl_draft"]
+                            )
+                            st.session_state["nl_draft"] = _edited
+                            if st.session_state.get("nl_saved_id"):
+                                update_newsletter(
+                                    st.session_state["nl_saved_id"], _edited
+                                )
+
+                    with _prev_col:
                         st.markdown(
-                            "<div style='margin-top:8px;font-size:12px;color:#7f8c8d'>Insert at end of draft:</div>",
+                            "<div style='font-size:11px;text-transform:uppercase;"
+                            "letter-spacing:.07em;color:#7f8c8d;margin-bottom:4px'>Preview</div>",
                             unsafe_allow_html=True,
                         )
-                        _ins_cols = st.columns(6, gap="small")
-                        _ins_items = [
-                            ("— HR", "\n\n---\n\n"),
-                            ("• Bullet", "\n- New item"),
-                            ("1. List", "\n1. New item"),
-                            ("# H1", "\n\n# New Section"),
-                            ("## H2", "\n\n## New Section"),
-                            ("🔗 Link", "\n[Link text](https://example.com)"),
-                        ]
-                        for _ii, (_ilabel, _itext) in enumerate(_ins_items):
-                            with _ins_cols[_ii]:
-                                if st.button(
-                                    _ilabel,
-                                    key=f"ft_ins_{_ii}",
-                                    use_container_width=True,
-                                ):
-                                    st.session_state["nl_undo_stack"].append(
-                                        st.session_state["nl_draft"]
-                                    )
-                                    st.session_state["nl_draft"] += _itext
-                                    if st.session_state.get("nl_saved_id"):
-                                        update_newsletter(
-                                            st.session_state["nl_saved_id"],
-                                            st.session_state["nl_draft"],
-                                        )
-                                    st.rerun()
-
-                    _edited = st.text_area(
-                        "newsletter_editor",
-                        value=st.session_state["nl_draft"],
-                        height=900,
-                        label_visibility="collapsed",
-                        key="nl_editor_area",
-                    )
-                    if _edited != st.session_state["nl_draft"]:
-                        st.session_state["nl_undo_stack"].append(
-                            st.session_state["nl_draft"]
+                        _preview_html = render_newsletter_html(
+                            title=_nl_title or "Newsletter Preview",
+                            meta=f"Endometriosis Intelligence · {datetime.now().strftime('%B %d, %Y')}",
+                            briefing_md=st.session_state["nl_draft"],
                         )
-                        st.session_state["nl_draft"] = _edited
-                        if st.session_state.get("nl_saved_id"):
-                            update_newsletter(st.session_state["nl_saved_id"], _edited)
+                        _st_components.html(_preview_html, height=900, scrolling=True)
 
-                with _prev_col:
-                    st.markdown(
-                        "<div style='font-size:11px;text-transform:uppercase;"
-                        "letter-spacing:.07em;color:#7f8c8d;margin-bottom:4px'>Preview</div>",
-                        unsafe_allow_html=True,
-                    )
-                    _preview_html = render_newsletter_html(
-                        title=_nl_title or "Newsletter Preview",
-                        meta=f"Endometriosis Intelligence · {datetime.now().strftime('%B %d, %Y')}",
-                        briefing_md=st.session_state["nl_draft"],
-                    )
-                    _st_components.html(_preview_html, height=900, scrolling=True)
+                    st.markdown("---")
 
-                st.markdown("---")
-
-                # ── AI Revision ────────────────────────────────
-                st.markdown("#### AI Revision")
-                _rev_scope_options = ["Full draft"] + [
-                    line[3:].strip()
-                    for line in st.session_state["nl_draft"].splitlines()
-                    if line.startswith("## ")
-                ]
-                _rv1, _rv2 = st.columns([3, 1], gap="medium")
-                with _rv1:
-                    _rev_instruction = st.text_area(
-                        "Revision instruction",
-                        placeholder=(
-                            "e.g. Make the Lead Story more concise. "
-                            "Strengthen the Why It Matters section. "
-                            "Add a more cautious tone to the Evidence Gaps section."
-                        ),
-                        height=90,
-                        key="nl_rev_instruction",
-                    )
-                with _rv2:
-                    _rev_scope = st.selectbox(
-                        "Scope", options=_rev_scope_options, key="nl_rev_scope"
-                    )
-                    _rev_btn = st.button(
-                        "Revise",
-                        type="primary",
-                        use_container_width=True,
-                        key="nl_revise_btn",
-                        disabled=not _rev_instruction.strip(),
-                    )
-
-                if _rev_btn and _rev_instruction.strip():
-                    _current_draft = st.session_state["nl_draft"]
-                    if _rev_scope == "Full draft":
-                        _rev_user_msg = (
-                            f"REVISION INSTRUCTION:\n{_rev_instruction}\n\n"
-                            f"SCOPE: Revise the full newsletter draft below.\n\n"
-                            f"CURRENT DRAFT:\n{_current_draft}"
+                    # ── AI Revision ────────────────────────────────
+                    st.markdown("#### AI Revision")
+                    _rev_scope_options = ["Full draft"] + [
+                        line[3:].strip()
+                        for line in st.session_state["nl_draft"].splitlines()
+                        if line.startswith("## ")
+                    ]
+                    _rv1, _rv2 = st.columns([3, 1], gap="medium")
+                    with _rv1:
+                        _rev_instruction = st.text_area(
+                            "Revision instruction",
+                            placeholder=(
+                                "e.g. Make the Lead Story more concise. "
+                                "Strengthen the Why It Matters section. "
+                                "Add a more cautious tone to the Evidence Gaps section."
+                            ),
+                            height=90,
+                            key="nl_rev_instruction",
                         )
-                        _replace_full = True
-                        _rev_target = _current_draft
-                    else:
-                        _sec_lines: List[str] = []
-                        _in_sec = False
-                        for _sl in _current_draft.splitlines():
-                            if _sl.startswith("## ") and _sl[3:].strip() == _rev_scope:
-                                _in_sec = True
-                                _sec_lines.append(_sl)
-                            elif _in_sec:
+                    with _rv2:
+                        _rev_scope = st.selectbox(
+                            "Scope", options=_rev_scope_options, key="nl_rev_scope"
+                        )
+                        _rev_btn = st.button(
+                            "Revise",
+                            type="primary",
+                            use_container_width=True,
+                            key="nl_revise_btn",
+                            disabled=not _rev_instruction.strip(),
+                        )
+
+                    if _rev_btn and _rev_instruction.strip():
+                        _current_draft = st.session_state["nl_draft"]
+                        if _rev_scope == "Full draft":
+                            _rev_user_msg = (
+                                f"REVISION INSTRUCTION:\n{_rev_instruction}\n\n"
+                                f"SCOPE: Revise the full newsletter draft below.\n\n"
+                                f"CURRENT DRAFT:\n{_current_draft}"
+                            )
+                            _replace_full = True
+                            _rev_target = _current_draft
+                        else:
+                            _sec_lines: List[str] = []
+                            _in_sec = False
+                            for _sl in _current_draft.splitlines():
                                 if (
                                     _sl.startswith("## ")
-                                    and _sl[3:].strip() != _rev_scope
+                                    and _sl[3:].strip() == _rev_scope
                                 ):
-                                    break
-                                _sec_lines.append(_sl)
-                        _rev_target = "\n".join(_sec_lines)
-                        _rev_user_msg = (
-                            f"REVISION INSTRUCTION:\n{_rev_instruction}\n\n"
-                            f"SCOPE: Revise only the '{_rev_scope}' section below. "
-                            f"Return only the revised section text.\n\n"
-                            f"SECTION TO REVISE:\n{_rev_target}"
-                        )
-                        _replace_full = False
-
-                    with st.spinner("Revising…"):
-                        try:
-                            _rv_client = _nl_make_client(_NL_DEPLOY)
-                            try:
-                                _rv_resp = _rv_client.responses.create(
-                                    model=_NL_DEPLOY,
-                                    input=[
-                                        {
-                                            "role": "system",
-                                            "content": _NL_REVISE_SYSTEM,
-                                        },
-                                        {"role": "user", "content": _rev_user_msg},
-                                    ],
-                                    max_output_tokens=3000,
-                                )
-                                _rv_text = (_rv_resp.output_text or "").strip()
-                            except Exception:
-                                _rv_resp = _rv_client.chat.completions.create(
-                                    model=_NL_DEPLOY,
-                                    messages=[
-                                        {
-                                            "role": "system",
-                                            "content": _NL_REVISE_SYSTEM,
-                                        },
-                                        {"role": "user", "content": _rev_user_msg},
-                                    ],
-                                    max_completion_tokens=3000,
-                                )
-                                _rv_text = (
-                                    _rv_resp.choices[0].message.content or ""
-                                ).strip()
-
-                            st.session_state["nl_undo_stack"].append(_current_draft)
-                            st.session_state["nl_draft"] = (
-                                _rv_text
-                                if _replace_full
-                                else _current_draft.replace(_rev_target, _rv_text, 1)
+                                    _in_sec = True
+                                    _sec_lines.append(_sl)
+                                elif _in_sec:
+                                    if (
+                                        _sl.startswith("## ")
+                                        and _sl[3:].strip() != _rev_scope
+                                    ):
+                                        break
+                                    _sec_lines.append(_sl)
+                            _rev_target = "\n".join(_sec_lines)
+                            _rev_user_msg = (
+                                f"REVISION INSTRUCTION:\n{_rev_instruction}\n\n"
+                                f"SCOPE: Revise only the '{_rev_scope}' section below. "
+                                f"Return only the revised section text.\n\n"
+                                f"SECTION TO REVISE:\n{_rev_target}"
                             )
+                            _replace_full = False
+
+                        with st.spinner("Revising…"):
+                            try:
+                                _rv_client = _nl_make_client(_NL_DEPLOY)
+                                try:
+                                    _rv_resp = _rv_client.responses.create(
+                                        model=_NL_DEPLOY,
+                                        input=[
+                                            {
+                                                "role": "system",
+                                                "content": _NL_REVISE_SYSTEM,
+                                            },
+                                            {"role": "user", "content": _rev_user_msg},
+                                        ],
+                                        max_output_tokens=3000,
+                                    )
+                                    _rv_text = (_rv_resp.output_text or "").strip()
+                                except Exception:
+                                    _rv_resp = _rv_client.chat.completions.create(
+                                        model=_NL_DEPLOY,
+                                        messages=[
+                                            {
+                                                "role": "system",
+                                                "content": _NL_REVISE_SYSTEM,
+                                            },
+                                            {"role": "user", "content": _rev_user_msg},
+                                        ],
+                                        max_completion_tokens=3000,
+                                    )
+                                    _rv_text = (
+                                        _rv_resp.choices[0].message.content or ""
+                                    ).strip()
+
+                                st.session_state["nl_undo_stack"].append(_current_draft)
+                                st.session_state["nl_draft"] = (
+                                    _rv_text
+                                    if _replace_full
+                                    else _current_draft.replace(
+                                        _rev_target, _rv_text, 1
+                                    )
+                                )
+                                if st.session_state.get("nl_saved_id"):
+                                    update_newsletter(
+                                        st.session_state["nl_saved_id"],
+                                        st.session_state["nl_draft"],
+                                    )
+                                st.rerun()
+                            except Exception as _rv_err:
+                                st.error(f"Revision failed: {_rv_err}")
+
+                    if st.session_state.get("nl_undo_stack"):
+                        if st.button("↩ Undo last revision", key="nl_undo"):
+                            st.session_state["nl_draft"] = st.session_state[
+                                "nl_undo_stack"
+                            ].pop()
                             if st.session_state.get("nl_saved_id"):
                                 update_newsletter(
                                     st.session_state["nl_saved_id"],
                                     st.session_state["nl_draft"],
                                 )
                             st.rerun()
-                        except Exception as _rv_err:
-                            st.error(f"Revision failed: {_rv_err}")
 
-                if st.session_state.get("nl_undo_stack"):
-                    if st.button("↩ Undo last revision", key="nl_undo"):
-                        st.session_state["nl_draft"] = st.session_state[
-                            "nl_undo_stack"
-                        ].pop()
-                        if st.session_state.get("nl_saved_id"):
-                            update_newsletter(
-                                st.session_state["nl_saved_id"],
-                                st.session_state["nl_draft"],
-                            )
-                        st.rerun()
+                    st.markdown("---")
 
-                st.markdown("---")
+                    # ── Save / Export ──────────────────────────────
+                    st.markdown("#### Save & Export")
+                    _exp1, _exp2, _exp3, _exp4 = st.columns(4, gap="small")
 
-                # ── Save / Export ──────────────────────────────
-                st.markdown("#### Save & Export")
-                _exp1, _exp2, _exp3, _exp4 = st.columns(4, gap="small")
+                    with _exp1:
+                        if st.button(
+                            "💾 Save draft", use_container_width=True, key="nl_save_btn"
+                        ):
+                            if st.session_state.get("nl_saved_id"):
+                                update_newsletter(
+                                    st.session_state["nl_saved_id"],
+                                    st.session_state["nl_draft"],
+                                )
+                                st.success("Saved.")
+                            else:
+                                _sid = save_newsletter(
+                                    title=_nl_title,
+                                    coverage_period=_nl_period or "Recent",
+                                    content_md=st.session_state["nl_draft"],
+                                    sources=[],
+                                    config={},
+                                )
+                                st.session_state["nl_saved_id"] = _sid
+                                st.success(f"Saved as Newsletter #{_sid}.")
 
-                with _exp1:
-                    if st.button(
-                        "💾 Save draft", use_container_width=True, key="nl_save_btn"
+                    with _exp2:
+                        st.download_button(
+                            "⬇ Export .md",
+                            data=st.session_state["nl_draft"].encode("utf-8"),
+                            file_name=f"newsletter_{datetime.now().strftime('%Y%m%d')}.md",
+                            mime="text/markdown",
+                            use_container_width=True,
+                            key="nl_dl_md",
+                        )
+
+                    with _exp3:
+                        _html_export = render_newsletter_html(
+                            title=_nl_title or "Newsletter",
+                            meta=f"Endometriosis Intelligence · {datetime.now().strftime('%B %d, %Y')}",
+                            briefing_md=st.session_state["nl_draft"],
+                        )
+                        st.download_button(
+                            "⬇ Export .html",
+                            data=_html_export.encode("utf-8"),
+                            file_name=f"newsletter_{datetime.now().strftime('%Y%m%d')}.html",
+                            mime="text/html",
+                            use_container_width=True,
+                            key="nl_dl_html",
+                        )
+
+                    with _exp4:
+                        st.download_button(
+                            "⬇ Export .txt",
+                            data=st.session_state["nl_draft"].encode("utf-8"),
+                            file_name=f"newsletter_{datetime.now().strftime('%Y%m%d')}.txt",
+                            mime="text/plain",
+                            use_container_width=True,
+                            key="nl_dl_txt",
+                        )
+
+                    with st.expander("Copy to clipboard", expanded=False):
+                        st.text_area(
+                            "Select all (Ctrl+A) and copy",
+                            value=st.session_state["nl_draft"],
+                            height=200,
+                            label_visibility="visible",
+                            key="nl_copy_area",
+                        )
+
+                # ── Past newsletters ───────────────────────────────
+                _nl_past = load_newsletters(limit=10)
+                if _nl_past:
+                    st.markdown("---")
+                    with st.expander(
+                        f"Saved Newsletters ({len(_nl_past)})", expanded=False
                     ):
-                        if st.session_state.get("nl_saved_id"):
-                            update_newsletter(
-                                st.session_state["nl_saved_id"],
-                                st.session_state["nl_draft"],
-                            )
-                            st.success("Saved.")
-                        else:
-                            _sid = save_newsletter(
-                                title=_nl_title,
-                                coverage_period=_nl_period or "Recent",
-                                content_md=st.session_state["nl_draft"],
-                                sources=[],
-                                config={},
-                            )
-                            st.session_state["nl_saved_id"] = _sid
-                            st.success(f"Saved as Newsletter #{_sid}.")
-
-                with _exp2:
-                    st.download_button(
-                        "⬇ Export .md",
-                        data=st.session_state["nl_draft"].encode("utf-8"),
-                        file_name=f"newsletter_{datetime.now().strftime('%Y%m%d')}.md",
-                        mime="text/markdown",
-                        use_container_width=True,
-                        key="nl_dl_md",
-                    )
-
-                with _exp3:
-                    _html_export = render_newsletter_html(
-                        title=_nl_title or "Newsletter",
-                        meta=f"Endometriosis Intelligence · {datetime.now().strftime('%B %d, %Y')}",
-                        briefing_md=st.session_state["nl_draft"],
-                    )
-                    st.download_button(
-                        "⬇ Export .html",
-                        data=_html_export.encode("utf-8"),
-                        file_name=f"newsletter_{datetime.now().strftime('%Y%m%d')}.html",
-                        mime="text/html",
-                        use_container_width=True,
-                        key="nl_dl_html",
-                    )
-
-                with _exp4:
-                    st.download_button(
-                        "⬇ Export .txt",
-                        data=st.session_state["nl_draft"].encode("utf-8"),
-                        file_name=f"newsletter_{datetime.now().strftime('%Y%m%d')}.txt",
-                        mime="text/plain",
-                        use_container_width=True,
-                        key="nl_dl_txt",
-                    )
-
-                with st.expander("Copy to clipboard", expanded=False):
-                    st.text_area(
-                        "Select all (Ctrl+A) and copy",
-                        value=st.session_state["nl_draft"],
-                        height=200,
-                        label_visibility="visible",
-                        key="nl_copy_area",
-                    )
-
-            # ── Past newsletters ───────────────────────────────
-            _nl_past = load_newsletters(limit=10)
-            if _nl_past:
-                st.markdown("---")
-                with st.expander(
-                    f"Saved Newsletters ({len(_nl_past)})", expanded=False
-                ):
-                    for _np in _nl_past:
-                        _np_c1, _np_c2 = st.columns([5, 1])
-                        with _np_c1:
-                            st.markdown(
-                                f"**#{_np['id']}** — {_np['title'] or 'Untitled'} "
-                                f"· {(_np['coverage_period'] or '')} "
-                                f"· {_np['updated_ts'][:16].replace('T', ' ')} UTC"
-                            )
-                        with _np_c2:
-                            if st.button(
-                                "Load",
-                                key=f"nl_load_{_np['id']}",
-                                use_container_width=True,
-                            ):
-                                st.session_state["nl_draft"] = _np["content_md"] or ""
-                                st.session_state["nl_saved_id"] = _np["id"]
-                                st.session_state["nl_undo_stack"] = []
-                                st.rerun()
+                        for _np in _nl_past:
+                            _np_c1, _np_c2 = st.columns([5, 1])
+                            with _np_c1:
+                                st.markdown(
+                                    f"**#{_np['id']}** — {_np['title'] or 'Untitled'} "
+                                    f"· {(_np['coverage_period'] or '')} "
+                                    f"· {_np['updated_ts'][:16].replace('T', ' ')} UTC"
+                                )
+                            with _np_c2:
+                                if st.button(
+                                    "Load",
+                                    key=f"nl_load_{_np['id']}",
+                                    use_container_width=True,
+                                ):
+                                    st.session_state["nl_draft"] = (
+                                        _np["content_md"] or ""
+                                    )
+                                    st.session_state["nl_saved_id"] = _np["id"]
+                                    st.session_state["nl_undo_stack"] = []
+                                    st.rerun()
 
 
 # ============================================================
@@ -2497,7 +2539,7 @@ with tab_nl_config:
     elif _nlc_src_choice == "Saved Newsletter":
         if not _nlc_saved_nls:
             st.warning(
-                "No saved newsletters found. Generate one on the Newsletter Builder tab first."
+                "No saved newsletters found. Generate one on the Build Newsletter from Intel Briefing tab first."
             )
         else:
             _nlc_nl_opts = {
@@ -2703,7 +2745,7 @@ with tab_nl_config:
     _nlc_saved_nls2 = load_newsletters(limit=20)
     if not _nlc_saved_nls2:
         st.info(
-            "No saved newsletters yet. Build one in the Newsletter Builder tab first."
+            "No saved newsletters yet. Build one in the Build Newsletter from Intel Briefing tab first."
         )
     else:
         _nlc_nl2_opts = {
@@ -3336,168 +3378,169 @@ with tab_search:
 # ============================================================
 # Tab 3: RAG Article Presentation
 # ============================================================
-with tab_rag:
+if SHOW_LEGACY_TABS:
+    with tab_rag:
 
-    # ── Dataset Controls ──────────────────────────────────────
-    with st.expander("🗄 Dataset Controls", expanded=False):
-        st.caption("Pull new articles, normalize, and rebuild vector embeddings.")
-        if st.button(
-            "🔄 Update Dataset", use_container_width=False, key="rag_update_dataset"
-        ):
-            _pipeline_steps = [
-                (
-                    "Pulling from data sources",
-                    [sys.executable, "-m", "src.pipelines.pull_all"],
-                ),
-                (
-                    "Normalizing & loading documents",
-                    [sys.executable, "-m", "src.pipelines.normalize_load"],
-                ),
-                (
-                    "Building vector embeddings",
-                    [sys.executable, "-m", "src.pipelines.embeddings"],
-                ),
-            ]
+        # ── Dataset Controls ──────────────────────────────────────
+        with st.expander("🗄 Dataset Controls", expanded=False):
+            st.caption("Pull new articles, normalize, and rebuild vector embeddings.")
+            if st.button(
+                "🔄 Update Dataset", use_container_width=False, key="rag_update_dataset"
+            ):
+                _pipeline_steps = [
+                    (
+                        "Pulling from data sources",
+                        [sys.executable, "-m", "src.pipelines.pull_all"],
+                    ),
+                    (
+                        "Normalizing & loading documents",
+                        [sys.executable, "-m", "src.pipelines.normalize_load"],
+                    ),
+                    (
+                        "Building vector embeddings",
+                        [sys.executable, "-m", "src.pipelines.embeddings"],
+                    ),
+                ]
 
-            with st.status("Updating dataset…", expanded=True) as _upd_status:
-                _had_error = False
-                _n_steps = len(_pipeline_steps)
-                _pbar = st.progress(0, text="Starting…")
-                _log = st.empty()
+                with st.status("Updating dataset…", expanded=True) as _upd_status:
+                    _had_error = False
+                    _n_steps = len(_pipeline_steps)
+                    _pbar = st.progress(0, text="Starting…")
+                    _log = st.empty()
 
-                for _i, (_step_label, _cmd) in enumerate(_pipeline_steps):
-                    _pbar.progress(
-                        _i / _n_steps,
-                        text=f"Step {_i + 1}/{_n_steps}: {_step_label}…",
-                    )
-                    _proc = subprocess.run(
-                        _cmd,
-                        cwd=str(REPO_ROOT),
-                        capture_output=True,
-                        text=True,
-                        encoding="utf-8",
-                        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
-                    )
-                    if _proc.returncode == 0:
-                        _out_lines = (_proc.stdout or "").strip().splitlines()
-                        _log.caption(
-                            "\n".join(_out_lines[-5:]) if _out_lines else "Done"
+                    for _i, (_step_label, _cmd) in enumerate(_pipeline_steps):
+                        _pbar.progress(
+                            _i / _n_steps,
+                            text=f"Step {_i + 1}/{_n_steps}: {_step_label}…",
+                        )
+                        _proc = subprocess.run(
+                            _cmd,
+                            cwd=str(REPO_ROOT),
+                            capture_output=True,
+                            text=True,
+                            encoding="utf-8",
+                            env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+                        )
+                        if _proc.returncode == 0:
+                            _out_lines = (_proc.stdout or "").strip().splitlines()
+                            _log.caption(
+                                "\n".join(_out_lines[-5:]) if _out_lines else "Done"
+                            )
+                        else:
+                            _pbar.progress(
+                                (_i + 1) / _n_steps,
+                                text=f"Failed at: {_step_label}",
+                            )
+                            _err_text = (
+                                _proc.stderr or _proc.stdout or "Unknown error"
+                            ).strip()
+                            st.code(_err_text[-1000:], language=None)
+                            _had_error = True
+                            break
+
+                    if _had_error:
+                        _upd_status.update(
+                            label="Update failed — see details above",
+                            state="error",
+                            expanded=True,
                         )
                     else:
-                        _pbar.progress(
-                            (_i + 1) / _n_steps,
-                            text=f"Failed at: {_step_label}",
+                        _pbar.progress(1.0, text="Complete")
+                        _log.empty()
+                        _upd_status.update(
+                            label="Dataset updated successfully",
+                            state="complete",
+                            expanded=False,
                         )
-                        _err_text = (
-                            _proc.stderr or _proc.stdout or "Unknown error"
-                        ).strip()
-                        st.code(_err_text[-1000:], language=None)
-                        _had_error = True
-                        break
+                        st.cache_data.clear()
+                        st.cache_resource.clear()
 
-                if _had_error:
-                    _upd_status.update(
-                        label="Update failed — see details above",
-                        state="error",
-                        expanded=True,
-                    )
-                else:
-                    _pbar.progress(1.0, text="Complete")
-                    _log.empty()
-                    _upd_status.update(
-                        label="Dataset updated successfully",
-                        state="complete",
-                        expanded=False,
-                    )
-                    st.cache_data.clear()
-                    st.cache_resource.clear()
+        st.markdown("---")
 
-    st.markdown("---")
+        # CSS handled by unified theme block at top of file
 
-    # CSS handled by unified theme block at top of file
+        # ── Helpers ───────────────────────────────────────────────
+        _SOURCE_LABELS: Dict[str, str] = {
+            "pubmed": "PubMed",
+            "openalex": "OpenAlex",
+            "ctgov": "ClinicalTrials",
+            "semantic_scholar": "Semantic Scholar",
+            "crossref": "Crossref",
+            "web_search": "Web",
+            "nih_reporter": "NIH Reporter",
+            "biorxiv": "bioRxiv",
+            "medrxiv": "medRxiv",
+        }
 
-    # ── Helpers ───────────────────────────────────────────────
-    _SOURCE_LABELS: Dict[str, str] = {
-        "pubmed": "PubMed",
-        "openalex": "OpenAlex",
-        "ctgov": "ClinicalTrials",
-        "semantic_scholar": "Semantic Scholar",
-        "crossref": "Crossref",
-        "web_search": "Web",
-        "nih_reporter": "NIH Reporter",
-        "biorxiv": "bioRxiv",
-        "medrxiv": "medRxiv",
-    }
+        def _badge_class(source: str) -> str:
+            return f"badge-{source}" if source in _SOURCE_LABELS else "badge-default"
 
-    def _badge_class(source: str) -> str:
-        return f"badge-{source}" if source in _SOURCE_LABELS else "badge-default"
+        def _format_date(raw: str) -> str:
+            if not raw:
+                return ""
+            try:
+                d = datetime.fromisoformat(str(raw)[:10])
+                return d.strftime("%b %d, %Y").replace(" 0", " ")
+            except Exception:
+                return str(raw)[:10]
 
-    def _format_date(raw: str) -> str:
-        if not raw:
-            return ""
-        try:
-            d = datetime.fromisoformat(str(raw)[:10])
-            return d.strftime("%b %d, %Y").replace(" 0", " ")
-        except Exception:
-            return str(raw)[:10]
+        def _authors_line(authors: Any) -> str:
+            if not authors:
+                return ""
+            if isinstance(authors, list):
+                names = [str(a) for a in authors[:3]]
+                suffix = " et al." if len(authors) > 3 else ""
+                return ", ".join(names) + suffix
+            return str(authors)
 
-    def _authors_line(authors: Any) -> str:
-        if not authors:
-            return ""
-        if isinstance(authors, list):
-            names = [str(a) for a in authors[:3]]
-            suffix = " et al." if len(authors) > 3 else ""
-            return ", ".join(names) + suffix
-        return str(authors)
+        def _tags_html(topics: Any, mesh: Any) -> str:
+            tags: List[str] = []
+            if isinstance(topics, list):
+                tags += [str(t) for t in topics[:4]]
+            if isinstance(mesh, list) and len(tags) < 4:
+                tags += [str(m) for m in mesh[: 4 - len(tags)]]
+            return "".join(f'<span class="endo-tag">{t}</span>' for t in tags if t)
 
-    def _tags_html(topics: Any, mesh: Any) -> str:
-        tags: List[str] = []
-        if isinstance(topics, list):
-            tags += [str(t) for t in topics[:4]]
-        if isinstance(mesh, list) and len(tags) < 4:
-            tags += [str(m) for m in mesh[: 4 - len(tags)]]
-        return "".join(f'<span class="endo-tag">{t}</span>' for t in tags if t)
+        def _render_card(row: pd.Series) -> str:
+            source = str(row.get("source", "")).lower()
+            label = _SOURCE_LABELS.get(source, source.replace("_", " ").title())
+            badge_cls = _badge_class(source)
 
-    def _render_card(row: pd.Series) -> str:
-        source = str(row.get("source", "")).lower()
-        label = _SOURCE_LABELS.get(source, source.replace("_", " ").title())
-        badge_cls = _badge_class(source)
-
-        title = str(row.get("title") or "Untitled").strip()
-        url = str(row.get("url") or row.get("doi") or "").strip()
-        title_html = (
-            f'<a href="{url}" target="_blank" rel="noopener">{title}</a>'
-            if url
-            else title
-        )
-
-        date_str = _format_date(str(row.get("published_date") or ""))
-        venue = str(row.get("journal_or_venue") or "").strip()
-        authors = _authors_line(row.get("authors"))
-        meta_parts = [p for p in [date_str, venue, authors] if p]
-        meta_html = " &nbsp;·&nbsp; ".join(meta_parts)
-
-        abstract = (
-            str(
-                row.get("abstract")
-                or row.get("summary")
-                or row.get("description")
-                or ""
+            title = str(row.get("title") or "Untitled").strip()
+            url = str(row.get("url") or row.get("doi") or "").strip()
+            title_html = (
+                f'<a href="{url}" target="_blank" rel="noopener">{title}</a>'
+                if url
+                else title
             )
-            .strip()
-            .replace("\n", " ")
-        )
 
-        tags_html = _tags_html(row.get("topics"), row.get("mesh_terms"))
-        quality = float(row.get("quality_score") or 0)
-        readmore = (
-            f'<a class="endo-readmore" href="{url}" target="_blank" rel="noopener">'
-            f"Read more &rarr;</a>"
-            if url
-            else ""
-        )
+            date_str = _format_date(str(row.get("published_date") or ""))
+            venue = str(row.get("journal_or_venue") or "").strip()
+            authors = _authors_line(row.get("authors"))
+            meta_parts = [p for p in [date_str, venue, authors] if p]
+            meta_html = " &nbsp;·&nbsp; ".join(meta_parts)
 
-        return f"""
+            abstract = (
+                str(
+                    row.get("abstract")
+                    or row.get("summary")
+                    or row.get("description")
+                    or ""
+                )
+                .strip()
+                .replace("\n", " ")
+            )
+
+            tags_html = _tags_html(row.get("topics"), row.get("mesh_terms"))
+            quality = float(row.get("quality_score") or 0)
+            readmore = (
+                f'<a class="endo-readmore" href="{url}" target="_blank" rel="noopener">'
+                f"Read more &rarr;</a>"
+                if url
+                else ""
+            )
+
+            return f"""
         <div class="endo-card">
           <div>
             <span class="endo-badge {badge_cls}">{label}</span>
@@ -3511,166 +3554,178 @@ with tab_rag:
         </div>
         """
 
-    # Lazy import of synthesis pipeline
-    try:
-        from src.pipelines.ai_search import (
-            synthesize_briefing as _rag_synthesize,
-            CHAT_DEPLOYMENT_5 as _RAG_DEPLOY_5,
-        )
-
-        _rag_synth_ok = True
-    except Exception:
-        _rag_synth_ok = False
-
-    # ── Load data ─────────────────────────────────────────────
-    try:
-        rag_df = load_docs_df()
-    except FileNotFoundError as e:
-        st.error(str(e))
-        st.stop()
-
-    all_sources = sorted(rag_df["source"].dropna().unique().tolist())
-
-    # ── Controls (full-width, above columns) ──────────────────
-    ctrl_col1, ctrl_col2, ctrl_col3 = st.columns([3, 2, 2])
-    with ctrl_col1:
-        search_filter = st.text_input(
-            "Filter by keyword",
-            placeholder="e.g. biomarker, laparoscopy, IL-6 …",
-            key="rag_search",
-        )
-    with ctrl_col2:
-        source_filter = st.multiselect(
-            "Source",
-            all_sources,
-            default=[],
-            format_func=lambda s: _SOURCE_LABELS.get(s, s),
-            key="rag_sources",
-        )
-    with ctrl_col3:
-        sort_by = st.selectbox(
-            "Sort by",
-            ["Newest first", "Oldest first", "Quality score"],
-            key="rag_sort",
-        )
-
-    # ── Filter & sort ─────────────────────────────────────────
-    view = rag_df.copy()
-
-    if source_filter:
-        view = view[view["source"].isin(source_filter)]
-
-    if search_filter.strip():
-        kw = search_filter.strip().lower()
-        mask = (
-            view["title"].str.lower().str.contains(kw, na=False)
-            | view["abstract"].str.lower().str.contains(kw, na=False)
-            | view.get("topics", pd.Series(dtype=str))
-            .astype(str)
-            .str.lower()
-            .str.contains(kw, na=False)
-        )
-        view = view[mask]
-
-    if sort_by == "Newest first":
-        view = view.sort_values("published_date", ascending=False, na_position="last")
-    elif sort_by == "Oldest first":
-        view = view.sort_values("published_date", ascending=True, na_position="last")
-    else:
-        view = view.sort_values("quality_score", ascending=False, na_position="last")
-
-    # ── Pagination state ──────────────────────────────────────
-    PAGE_SIZE = 20
-    total = len(view)
-    if "rag_page" not in st.session_state:
-        st.session_state["rag_page"] = 0
-
-    filter_key = f"{search_filter}|{'|'.join(source_filter)}|{sort_by}"
-    if st.session_state.get("_rag_filter_key") != filter_key:
-        st.session_state["rag_page"] = 0
-        st.session_state["_rag_filter_key"] = filter_key
-        st.session_state.pop(
-            "rag_brief_result", None
-        )  # reset briefing when filters change
-
-    page = st.session_state["rag_page"]
-    page_start = page * PAGE_SIZE
-    page_end = page_start + PAGE_SIZE
-    page_df = view.iloc[page_start:page_end]
-
-    # ── Two-column layout ─────────────────────────────────────
-    _rag_cards_col, _rag_brief_col = st.columns([1.55, 1], gap="large")
-
-    # ── Right: AI Briefing panel ──────────────────────────────
-    with _rag_brief_col:
-        _rag_brief = st.session_state.get("rag_brief_result")
-
-        if _rag_synth_ok:
-            _rag_gen_btn = st.button(
-                "Generate AI Briefing",
-                type="primary",
-                use_container_width=True,
-                key="rag_gen_brief",
+        # Lazy import of synthesis pipeline
+        try:
+            from src.pipelines.ai_search import (
+                synthesize_briefing as _rag_synthesize,
+                CHAT_DEPLOYMENT_5 as _RAG_DEPLOY_5,
             )
-            if _rag_gen_btn and total > 0:
-                # Build source dicts from top-quality articles in the filtered view
-                _brief_src_df = view.sort_values("quality_score", ascending=False).head(
-                    15
+
+            _rag_synth_ok = True
+        except Exception:
+            _rag_synth_ok = False
+
+        # ── Load data ─────────────────────────────────────────────
+        try:
+            rag_df = load_docs_df()
+        except FileNotFoundError as e:
+            st.error(str(e))
+            st.stop()
+
+        all_sources = sorted(rag_df["source"].dropna().unique().tolist())
+
+        # ── Controls (full-width, above columns) ──────────────────
+        ctrl_col1, ctrl_col2, ctrl_col3 = st.columns([3, 2, 2])
+        with ctrl_col1:
+            search_filter = st.text_input(
+                "Filter by keyword",
+                placeholder="e.g. biomarker, laparoscopy, IL-6 …",
+                key="rag_search",
+            )
+        with ctrl_col2:
+            source_filter = st.multiselect(
+                "Source",
+                all_sources,
+                default=[],
+                format_func=lambda s: _SOURCE_LABELS.get(s, s),
+                key="rag_sources",
+            )
+        with ctrl_col3:
+            sort_by = st.selectbox(
+                "Sort by",
+                ["Newest first", "Oldest first", "Quality score"],
+                key="rag_sort",
+            )
+
+        # ── Filter & sort ─────────────────────────────────────────
+        view = rag_df.copy()
+
+        if source_filter:
+            view = view[view["source"].isin(source_filter)]
+
+        if search_filter.strip():
+            kw = search_filter.strip().lower()
+            mask = (
+                view["title"].str.lower().str.contains(kw, na=False)
+                | view["abstract"].str.lower().str.contains(kw, na=False)
+                | view.get("topics", pd.Series(dtype=str))
+                .astype(str)
+                .str.lower()
+                .str.contains(kw, na=False)
+            )
+            view = view[mask]
+
+        if sort_by == "Newest first":
+            view = view.sort_values(
+                "published_date", ascending=False, na_position="last"
+            )
+        elif sort_by == "Oldest first":
+            view = view.sort_values(
+                "published_date", ascending=True, na_position="last"
+            )
+        else:
+            view = view.sort_values(
+                "quality_score", ascending=False, na_position="last"
+            )
+
+        # ── Pagination state ──────────────────────────────────────
+        PAGE_SIZE = 20
+        total = len(view)
+        if "rag_page" not in st.session_state:
+            st.session_state["rag_page"] = 0
+
+        filter_key = f"{search_filter}|{'|'.join(source_filter)}|{sort_by}"
+        if st.session_state.get("_rag_filter_key") != filter_key:
+            st.session_state["rag_page"] = 0
+            st.session_state["_rag_filter_key"] = filter_key
+            st.session_state.pop(
+                "rag_brief_result", None
+            )  # reset briefing when filters change
+
+        page = st.session_state["rag_page"]
+        page_start = page * PAGE_SIZE
+        page_end = page_start + PAGE_SIZE
+        page_df = view.iloc[page_start:page_end]
+
+        # ── Two-column layout ─────────────────────────────────────
+        _rag_cards_col, _rag_brief_col = st.columns([1.55, 1], gap="large")
+
+        # ── Right: AI Briefing panel ──────────────────────────────
+        with _rag_brief_col:
+            _rag_brief = st.session_state.get("rag_brief_result")
+
+            if _rag_synth_ok:
+                _rag_gen_btn = st.button(
+                    "Generate AI Briefing",
+                    type="primary",
+                    use_container_width=True,
+                    key="rag_gen_brief",
                 )
-                _brief_sources = []
-                for _, _brow in _brief_src_df.iterrows():
-                    _brief_sources.append(
-                        {
-                            "title": str(_brow.get("title") or ""),
-                            "url": str(_brow.get("url") or _brow.get("doi") or ""),
-                            "snippet": str(
-                                _brow.get("abstract") or _brow.get("summary") or ""
-                            )[:600],
-                            "source_name": str(
-                                _brow.get("journal_or_venue")
-                                or _brow.get("source")
-                                or ""
-                            ),
-                            "published_date": str(_brow.get("published_date") or ""),
-                            "composite_score": float(_brow.get("quality_score") or 0),
+                if _rag_gen_btn and total > 0:
+                    # Build source dicts from top-quality articles in the filtered view
+                    _brief_src_df = view.sort_values(
+                        "quality_score", ascending=False
+                    ).head(15)
+                    _brief_sources = []
+                    for _, _brow in _brief_src_df.iterrows():
+                        _brief_sources.append(
+                            {
+                                "title": str(_brow.get("title") or ""),
+                                "url": str(_brow.get("url") or _brow.get("doi") or ""),
+                                "snippet": str(
+                                    _brow.get("abstract") or _brow.get("summary") or ""
+                                )[:600],
+                                "source_name": str(
+                                    _brow.get("journal_or_venue")
+                                    or _brow.get("source")
+                                    or ""
+                                ),
+                                "published_date": str(
+                                    _brow.get("published_date") or ""
+                                ),
+                                "composite_score": float(
+                                    _brow.get("quality_score") or 0
+                                ),
+                            }
+                        )
+
+                    _topic_ctx = (
+                        f"endometriosis — {search_filter.strip()}"
+                        if search_filter.strip()
+                        else "endometriosis"
+                    )
+                    _rag_pbar = st.progress(
+                        0, text="Synthesizing briefing from dataset…"
+                    )
+                    try:
+                        _rag_briefing_text, _rag_perf = _rag_synthesize(
+                            _brief_sources, _topic_ctx, 365, _RAG_DEPLOY_5
+                        )
+                        _rag_pbar.progress(100, text="Done")
+                        _rag_pbar.empty()
+                        _rag_filter_label = search_filter.strip() or "All articles"
+                        _rag_run_id = save_rag_brief(
+                            filter_label=_rag_filter_label,
+                            n_sources=len(_brief_sources),
+                            latency_ms=_rag_perf.get("latency_ms", 0),
+                            briefing_text=_rag_briefing_text,
+                        )
+                        st.session_state["rag_brief_result"] = {
+                            "briefing": _rag_briefing_text,
+                            "n_sources": len(_brief_sources),
+                            "filter": _rag_filter_label,
+                            "latency_ms": _rag_perf.get("latency_ms", 0),
+                            "ts": datetime.now().strftime("%b %d, %Y %H:%M"),
+                            "run_id": _rag_run_id,
                         }
-                    )
+                        _rag_brief = st.session_state["rag_brief_result"]
+                    except Exception as _rb_exc:
+                        _rag_pbar.empty()
+                        st.error(f"Briefing failed: {_rb_exc}")
 
-                _topic_ctx = (
-                    f"endometriosis — {search_filter.strip()}"
-                    if search_filter.strip()
-                    else "endometriosis"
-                )
-                _rag_pbar = st.progress(0, text="Synthesizing briefing from dataset…")
-                try:
-                    _rag_briefing_text, _rag_perf = _rag_synthesize(
-                        _brief_sources, _topic_ctx, 365, _RAG_DEPLOY_5
-                    )
-                    _rag_pbar.progress(100, text="Done")
-                    _rag_pbar.empty()
-                    _rag_filter_label = search_filter.strip() or "All articles"
-                    _rag_run_id = save_rag_brief(
-                        filter_label=_rag_filter_label,
-                        n_sources=len(_brief_sources),
-                        latency_ms=_rag_perf.get("latency_ms", 0),
-                        briefing_text=_rag_briefing_text,
-                    )
-                    st.session_state["rag_brief_result"] = {
-                        "briefing": _rag_briefing_text,
-                        "n_sources": len(_brief_sources),
-                        "filter": _rag_filter_label,
-                        "latency_ms": _rag_perf.get("latency_ms", 0),
-                        "ts": datetime.now().strftime("%b %d, %Y %H:%M"),
-                        "run_id": _rag_run_id,
-                    }
-                    _rag_brief = st.session_state["rag_brief_result"]
-                except Exception as _rb_exc:
-                    _rag_pbar.empty()
-                    st.error(f"Briefing failed: {_rb_exc}")
-
-        if _rag_brief:
-            st.markdown(
-                f"""
+            if _rag_brief:
+                st.markdown(
+                    f"""
                 <div class="brief-panel">
                   <div class="brief-panel-header">
                     AI Briefing
@@ -3683,49 +3738,49 @@ with tab_rag:
                   </div>
                   <div class="brief-panel-body">
                 """,
-                unsafe_allow_html=True,
-            )
-            st.markdown(_rag_brief["briefing"])
-            st.markdown("</div></div>", unsafe_allow_html=True)
+                    unsafe_allow_html=True,
+                )
+                st.markdown(_rag_brief["briefing"])
+                st.markdown("</div></div>", unsafe_allow_html=True)
 
-            # ── Email this briefing ──────────────────────────
-            with st.expander("Email this briefing", expanded=False):
-                _rag_cfg = load_smtp_config()
-                if not smtp_configured():
-                    st.warning(
-                        "SMTP not configured. Add `EMAIL_SMTP_HOST`, `EMAIL_FROM`, "
-                        "and `EMAIL_PASSWORD` to your `.env` file."
-                    )
-                else:
-                    _rag_default_to = _rag_cfg.default_to if _rag_cfg else ""
-                    _rag_email_to = st.text_input(
-                        "Recipient",
-                        value=_rag_default_to,
-                        key="rag_email_to",
-                        placeholder="you@example.com",
-                    )
-                    if st.button("Send", key="rag_email_send"):
-                        if not _rag_email_to.strip():
-                            st.error("Enter a recipient email address.")
-                        else:
-                            try:
-                                _rag_meta = (
-                                    f"{_rag_brief['ts']} · {_rag_brief['n_sources']} sources · "
-                                    f"Filter: {_rag_brief['filter']}"
-                                )
-                                send_briefing(
-                                    to_addr=_rag_email_to.strip(),
-                                    subject=f"Evidence Gap AI Briefing — {_rag_brief['ts'][:10]}",
-                                    title="AI Briefing",
-                                    meta=_rag_meta,
-                                    briefing_md=_rag_brief["briefing"],
-                                )
-                                st.success(f"Sent to {_rag_email_to.strip()}")
-                            except Exception as _rag_mail_exc:
-                                st.error(f"Send failed: {_rag_mail_exc}")
-        else:
-            st.markdown(
-                """
+                # ── Email this briefing ──────────────────────────
+                with st.expander("Email this briefing", expanded=False):
+                    _rag_cfg = load_smtp_config()
+                    if not smtp_configured():
+                        st.warning(
+                            "SMTP not configured. Add `EMAIL_SMTP_HOST`, `EMAIL_FROM`, "
+                            "and `EMAIL_PASSWORD` to your `.env` file."
+                        )
+                    else:
+                        _rag_default_to = _rag_cfg.default_to if _rag_cfg else ""
+                        _rag_email_to = st.text_input(
+                            "Recipient",
+                            value=_rag_default_to,
+                            key="rag_email_to",
+                            placeholder="you@example.com",
+                        )
+                        if st.button("Send", key="rag_email_send"):
+                            if not _rag_email_to.strip():
+                                st.error("Enter a recipient email address.")
+                            else:
+                                try:
+                                    _rag_meta = (
+                                        f"{_rag_brief['ts']} · {_rag_brief['n_sources']} sources · "
+                                        f"Filter: {_rag_brief['filter']}"
+                                    )
+                                    send_briefing(
+                                        to_addr=_rag_email_to.strip(),
+                                        subject=f"Evidence Gap AI Briefing — {_rag_brief['ts'][:10]}",
+                                        title="AI Briefing",
+                                        meta=_rag_meta,
+                                        briefing_md=_rag_brief["briefing"],
+                                    )
+                                    st.success(f"Sent to {_rag_email_to.strip()}")
+                                except Exception as _rag_mail_exc:
+                                    st.error(f"Send failed: {_rag_mail_exc}")
+            else:
+                st.markdown(
+                    """
                 <div class="brief-panel">
                   <div class="brief-panel-header">AI Briefing</div>
                   <div class="brief-panel-body" style="color:#7fa8cc;font-style:italic;
@@ -3735,43 +3790,43 @@ with tab_rag:
                   </div>
                 </div>
                 """,
-                unsafe_allow_html=True,
-            )
-
-    # ── Left: article cards + pagination ─────────────────────
-    with _rag_cards_col:
-        st.caption(
-            f"Showing {page_start + 1}–{min(page_end, total)} of {total:,} articles"
-            + (f' matching "{search_filter}"' if search_filter.strip() else "")
-        )
-
-        if page_df.empty:
-            st.info("No articles match your filters.")
-        else:
-            left_col, right_col = st.columns(2, gap="medium")
-            rows_list = list(page_df.iterrows())
-            for i, (_, row) in enumerate(rows_list):
-                col = left_col if i % 2 == 0 else right_col
-                with col:
-                    st.markdown(_render_card(row), unsafe_allow_html=True)
-
-        if total > PAGE_SIZE:
-            max_page = (total - 1) // PAGE_SIZE
-            nav_l, nav_c, nav_r = st.columns([1, 3, 1])
-            with nav_l:
-                if st.button("← Previous", disabled=page == 0, key="rag_prev"):
-                    st.session_state["rag_page"] -= 1
-                    st.rerun()
-            with nav_c:
-                st.markdown(
-                    f"<div style='text-align:center;padding-top:6px;color:#888;font-size:0.82rem;'>"
-                    f"Page {page + 1} of {max_page + 1}</div>",
                     unsafe_allow_html=True,
                 )
-            with nav_r:
-                if st.button("Next →", disabled=page >= max_page, key="rag_next"):
-                    st.session_state["rag_page"] += 1
-                    st.rerun()
+
+        # ── Left: article cards + pagination ─────────────────────
+        with _rag_cards_col:
+            st.caption(
+                f"Showing {page_start + 1}–{min(page_end, total)} of {total:,} articles"
+                + (f' matching "{search_filter}"' if search_filter.strip() else "")
+            )
+
+            if page_df.empty:
+                st.info("No articles match your filters.")
+            else:
+                left_col, right_col = st.columns(2, gap="medium")
+                rows_list = list(page_df.iterrows())
+                for i, (_, row) in enumerate(rows_list):
+                    col = left_col if i % 2 == 0 else right_col
+                    with col:
+                        st.markdown(_render_card(row), unsafe_allow_html=True)
+
+            if total > PAGE_SIZE:
+                max_page = (total - 1) // PAGE_SIZE
+                nav_l, nav_c, nav_r = st.columns([1, 3, 1])
+                with nav_l:
+                    if st.button("← Previous", disabled=page == 0, key="rag_prev"):
+                        st.session_state["rag_page"] -= 1
+                        st.rerun()
+                with nav_c:
+                    st.markdown(
+                        f"<div style='text-align:center;padding-top:6px;color:#888;font-size:0.82rem;'>"
+                        f"Page {page + 1} of {max_page + 1}</div>",
+                        unsafe_allow_html=True,
+                    )
+                with nav_r:
+                    if st.button("Next →", disabled=page >= max_page, key="rag_next"):
+                        st.session_state["rag_page"] += 1
+                        st.rerun()
 
 
 # ============================================================

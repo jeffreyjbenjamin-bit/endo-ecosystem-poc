@@ -14,6 +14,14 @@ footer. Keep each version's changes in its own <ul> list. -->
 
 <tr><td>2026-11-07</td><td>
 
+<b>v1.8.0</b>
+<ul>
+<li>RAG Article Presentation and the original Newsletter Builder tabs hidden.</li>
+<li><b>Recent newsletters</b> menu on Build Newsletter from Intel Briefing to reopen any recent newsletter for editing.</li>
+<li>Visual (WYSIWYG) newsletter editor with a formatting toolbar; a Markdown view is still available.</li>
+<li><b>Send</b> button on the editing page emails the newsletter to newsletter subscribers after a confirmation, and <b>Send with daily briefing</b> queues it for the next daily send.</li>
+</ul>
+
 <b>v1.7.0</b>
 <ul>
 <li>"AI Article Search &amp; Summary" tab renamed to <b>Build Intelligence Briefing</b>.</li>

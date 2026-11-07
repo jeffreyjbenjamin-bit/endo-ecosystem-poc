@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Newsletter editor</title>
+<style>
+  :root {
+    --ink: #1a2535; --muted: #6b7a8c; --line: #dde4ef; --accent: #1F6FEB;
+    --bg: #ffffff; --toolbar: #f6f8fc;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: transparent; font-family: "Source Sans Pro", system-ui, sans-serif; }
+  .wrap { border: 1px solid var(--line); border-radius: 10px; background: var(--bg); display: flex; flex-direction: column; overflow: hidden; }
+  .toolbar { display: flex; flex-wrap: wrap; gap: 4px; padding: 6px 8px; background: var(--toolbar); border-bottom: 1px solid var(--line); }
+  .toolbar button {
+    border: 1px solid transparent; background: transparent; color: var(--ink); border-radius: 6px;
+    min-width: 30px; height: 30px; padding: 0 8px; font-size: 13px; cursor: pointer; font-family: inherit;
+  }
+  .toolbar button:hover { background: #e8eef9; }
+  .toolbar button.on { background: #dbe7ff; border-color: #b9cff7; color: #0d2137; }
+  .toolbar .sep { width: 1px; background: var(--line); margin: 4px 4px; }
+  .scroll { overflow-y: auto; padding: 18px 26px; }
+  .ProseMirror { outline: none; color: var(--ink); font-family: Georgia, "Times New Roman", serif; font-size: 15px; line-height: 1.65; min-height: 300px; }
+  .ProseMirror h1 { font-size: 1.6em; color: #0d2137; margin: 0.4em 0 0.3em; }
+  .ProseMirror h2 { font-size: 0.95em; text-transform: uppercase; letter-spacing: .05em; color: #0d2137;
+    border-bottom: 1.5px solid var(--line); padding-bottom: 4px; margin: 1.4em 0 0.6em; font-family: Arial, sans-serif; }
+  .ProseMirror h3 { font-size: 1.1em; color: #1a4f8a; margin: 1em 0 0.4em; }
+  .ProseMirror p { margin: 0 0 0.8em; }
+  .ProseMirror a { color: #1a6eb5; }
+  .ProseMirror hr { border: none; border-top: 1px solid var(--line); margin: 1.2em 0; }
+  .ProseMirror ul, .ProseMirror ol { padding-left: 1.4em; }
+  .status { font: 12px Arial, sans-serif; color: var(--muted); padding: 10px 14px; }
+  .status.err { color: #a12a2a; }
+</style>
+</head>
+<body>
+<div class="wrap" id="wrap">
+  <div class="toolbar" id="toolbar"></div>
+  <div class="scroll" id="scroll"><div id="editor"><div class="status">Loading editor…</div></div></div>
+</div>
+
+<script type="module">
+// ── Streamlit component protocol (no build step) ─────────────────────────────
+const send = (type, data = {}) =>
+  window.parent.postMessage({ isStreamlitMessage: true, type, ...data }, "*");
+const setHeight = () => send("streamlit:setFrameHeight", { height: document.documentElement.scrollHeight });
+const setValue = (value) => send("streamlit:setComponentValue", { value, dataType: "json" });
+
+let editor = null;
+let docId = null;
+let debounce = null;
+
+function showError(msg) {
+  document.getElementById("editor").innerHTML =
+    `<div class="status err">The visual editor couldn't load (${msg}). Switch to the Markdown view to edit.</div>`;
+  setHeight();
+}
+
+// Pinned versions; the page loads Tiptap from the CDN in the viewer's browser.
+let Editor, StarterKit, Link, Markdown;
+try {
+  ({ Editor } = await import("https://esm.sh/@tiptap/core@2.11.5"));
+  StarterKit = (await import("https://esm.sh/@tiptap/starter-kit@2.11.5")).default;
+  Link = (await import("https://esm.sh/@tiptap/extension-link@2.11.5")).default;
+  ({ Markdown } = await import("https://esm.sh/tiptap-markdown@0.8.10?deps=@tiptap/core@2.11.5"));
+} catch (e) {
+  showError(e && e.message ? e.message : "network error");
+}
+
+const TOOLS = [
+  ["B", "Bold", (c) => c.toggleBold(), "bold"],
+  ["I", "Italic", (c) => c.toggleItalic(), "italic"],
+  ["|"],
+  ["H1", "Title", (c) => c.toggleHeading({ level: 1 }), ["heading", { level: 1 }]],
+  ["H2", "Section heading", (c) => c.toggleHeading({ level: 2 }), ["heading", { level: 2 }]],
+  ["H3", "Sub-heading", (c) => c.toggleHeading({ level: 3 }), ["heading", { level: 3 }]],
+  ["|"],
+  ["• List", "Bulleted list", (c) => c.toggleBulletList(), "bulletList"],
+  ["1. List", "Numbered list", (c) => c.toggleOrderedList(), "orderedList"],
+  ["❝", "Quote", (c) => c.toggleBlockquote(), "blockquote"],
+  ["―", "Divider", (c) => c.setHorizontalRule(), null],
+  ["|"],
+  ["🔗 Link", "Add or edit link", null, "link"],
+  ["|"],
+  ["↶", "Undo", (c) => c.undo(), null],
+  ["↷", "Redo", (c) => c.redo(), null],
+];
+
+function buildToolbar() {
+  const bar = document.getElementById("toolbar");
+  bar.innerHTML = "";
+  for (const [label, title, run, active] of TOOLS) {
+    if (label === "|") { const s = document.createElement("span"); s.className = "sep"; bar.appendChild(s); continue; }
+    const b = document.createElement("button");
+    b.type = "button"; b.textContent = label; b.title = title;
+    b.onmousedown = (e) => e.preventDefault();
+    b.onclick = () => {
+      if (label === "🔗 Link") {
+        const prev = editor.getAttributes("link").href || "";
+        const url = window.prompt("Link address (leave empty to remove):", prev);
+        if (url === null) return;
+        const chain = editor.chain().focus().extendMarkRange("link");
+        (url ? chain.setLink({ href: url }) : chain.unsetLink()).run();
+        return;
+      }
+      run(editor.chain().focus()).run();
+    };
+    b.dataset.active = JSON.stringify(active);
+    bar.appendChild(b);
+  }
+}
+
+function refreshToolbar() {
+  for (const b of document.querySelectorAll("#toolbar button")) {
+    const a = JSON.parse(b.dataset.active || "null");
+    const on = a && (Array.isArray(a) ? editor.isActive(a[0], a[1]) : editor.isActive(a));
+    b.classList.toggle("on", !!on);
+  }
+}
+
+function createEditor(markdown, height) {
+  if (editor) editor.destroy();
+  document.getElementById("editor").innerHTML = "";
+  document.getElementById("scroll").style.height = `${Math.max(300, height - 48)}px`;
+  editor = new Editor({
+    element: document.getElementById("editor"),
+    extensions: [
+      StarterKit,
+      // No auto-linking: bare URLs stay plain text, as the email template expects.
+      Link.configure({ openOnClick: false, autolink: false, linkOnPaste: true }),
+      Markdown.configure({ html: false, tightLists: true, linkify: false, breaks: false, transformPastedText: true }),
+    ],
+    content: markdown || "",
+    onUpdate: () => {
+      clearTimeout(debounce);
+      debounce = setTimeout(() => setValue(editor.storage.markdown.getMarkdown()), 700);
+    },
+    onSelectionUpdate: refreshToolbar,
+    onTransaction: refreshToolbar,
+  });
+  buildToolbar();
+  refreshToolbar();
+  setHeight();
+}
+
+window.addEventListener("message", (event) => {
+  const data = event.data || {};
+  if (data.type !== "streamlit:render") return;
+  const args = data.args || {};
+  if (!Editor) { setHeight(); return; }
+  // Only (re)load content when a different document/version is opened, so reruns
+  // triggered by typing never reset the cursor or overwrite unsent edits.
+  if (!editor || args.doc_id !== docId) {
+    docId = args.doc_id;
+    try { createEditor(args.markdown, args.height || 700); }
+    catch (e) { showError(e && e.message ? e.message : "init error"); }
+  }
+});
+
+send("streamlit:componentReady", { apiVersion: 1 });
+setHeight();
+</script>
+</body>
+</html>

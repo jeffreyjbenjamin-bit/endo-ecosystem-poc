@@ -7,9 +7,10 @@ Workflow
 2. Pick one or two articles from that briefing as the basis for the newsletter.
 3. Search for similar articles (local evidence library via embeddings, and/or web
    search) and choose supporting articles.
-4. Generate a newsletter draft from the base + supporting articles, edit it, and
-   save it to newsletters.sqlite (the same store the original Newsletter Builder
-   uses, so saved drafts can be loaded and sent from there).
+4. Generate a newsletter from the base + supporting articles. It is saved to
+   newsletters.sqlite and opens on a separate editing page (?view=newsletter&id=N)
+   with a visual (Tiptap) or Markdown editor, an email preview, and Send / queue for
+   the daily send. Recent newsletters can be reopened from the tab's top bar.
 
 The Intelligence Briefing and the Newsletter remain separate reports: this tab only
 reads briefings and never modifies them.
@@ -24,10 +25,12 @@ import hashlib
 import html as html_lib
 import json
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Set, Tuple
 
 import streamlit as st
+
+from src.ui.wysiwyg import tiptap_editor
 
 MAX_BASE_ARTICLES = 2
 _SS = "nb2_"  # session-state key prefix for this tab
@@ -692,6 +695,40 @@ def _render_flyout(base: List[Dict[str, Any]], sig: str) -> None:
                 )
 
 
+def _open_newsletter(nid: int) -> None:
+    preserve_state()
+    st.query_params.update({_VIEW_PARAM: _EDITOR_VIEW, "id": str(nid)})
+
+
+def _recent_newsletters_menu(deps: Dict[str, Any]) -> None:
+    """Popover listing recent newsletters, each with an Open button for the editor."""
+    with st.popover("📂 Recent newsletters", use_container_width=True):
+        recent = deps["load_newsletters"](15)
+        if not recent:
+            st.caption("No saved newsletters yet.")
+            return
+        pending = deps["get_nl_config"]("pending_newsletter_id", "")
+        for nl in recent:
+            c1, c2 = st.columns([0.78, 0.22], vertical_alignment="center")
+            with c1:
+                when = (nl.get("updated_ts") or nl.get("created_ts") or "")[:10]
+                queued = " · ⏳ queued" if str(nl["id"]) == pending else ""
+                st.markdown(
+                    f"**#{nl['id']} {_esc(nl.get('title') or 'Untitled')}**  \n"
+                    f"<small>{_esc(nl.get('coverage_period') or '')} · "
+                    f"updated {when}{queued}</small>",
+                    unsafe_allow_html=True,
+                )
+            with c2:
+                st.button(
+                    "Open",
+                    key=_k(f"open_nl_{nl['id']}_btn"),
+                    on_click=_open_newsletter,
+                    args=(nl["id"],),
+                    use_container_width=True,
+                )
+
+
 def render_tab(deps: Dict[str, Any]) -> None:
     """
     deps keys:
@@ -716,9 +753,11 @@ def render_tab(deps: Dict[str, Any]) -> None:
     run_by_id = {r["id"]: r for r in runs}
     if st.session_state.get(_k("run_id")) not in run_by_id:
         st.session_state[_k("run_id")] = runs[0]["id"]  # default: most recent
-    top1, top2, top3, top4 = st.columns(
-        [3.2, 1.5, 0.9, 0.5], vertical_alignment="bottom"
+    top1, top2, top3, top5, top4 = st.columns(
+        [3.0, 1.45, 0.95, 1.1, 0.45], vertical_alignment="bottom"
     )
+    with top5:
+        _recent_newsletters_menu(deps)
     with top1:
         run_id = st.selectbox(
             "Intelligence Briefing",
@@ -962,7 +1001,7 @@ def _generate_and_open(
 _VIEW_PARAM = "view"
 _EDITOR_VIEW = "newsletter"
 # Buttons (and similar) can't have their state assigned, so preserve_state skips them
-_BUTTON_KEYS = ("_btn", "_flyout", "nb2_rm_", "nb2_ed_")
+_BUTTON_KEYS = ("_btn", "_flyout", "nb2_rm_", "nb2_ed_", "nb2_tt_")
 
 
 def preserve_state() -> None:
@@ -989,11 +1028,94 @@ def _back_to_tab() -> None:
     st.session_state["return_to_nb2"] = True
 
 
+def _newsletter_recipients(deps: Dict[str, Any]) -> List[Dict[str, Any]]:
+    return [
+        r
+        for r in deps["load_recipients"]()
+        if (r.get("subscription_type") or "briefing") in ("newsletter", "both")
+    ]
+
+
+@st.dialog("Send newsletter", width="medium")
+def _send_dialog(deps: Dict[str, Any], nid: int, title: str, md: str) -> None:
+    recips = _newsletter_recipients(deps)
+    if not deps["smtp_configured"]():
+        st.error("Email (SMTP) isn't configured, so the newsletter can't be sent.")
+        return
+    if not recips:
+        st.warning(
+            "No one is subscribed to the Newsletter. Add recipients or change "
+            "subscriptions in Report Config."
+        )
+        return
+    subject = f"Evidence Gap — {title}"
+    st.markdown(f"**Subject:** {_esc(subject)}", unsafe_allow_html=True)
+    st.markdown(
+        f"This emails **Newsletter #{nid}** now to **{len(recips)}** newsletter "
+        "subscriber(s):"
+    )
+    st.markdown(
+        "\n".join(f"- {_esc(r['name'])} &lt;{_esc(r['email'])}&gt;" for r in recips),
+        unsafe_allow_html=True,
+    )
+    st.caption("Unsaved edits are saved first, so recipients get exactly what you see.")
+    c1, c2 = st.columns(2)
+    with c1:
+        go = st.button(
+            "📤 Send now",
+            type="primary",
+            use_container_width=True,
+            key=_k("send_confirm_btn"),
+        )
+    with c2:
+        if st.button("Cancel", use_container_width=True, key=_k("send_cancel_btn")):
+            st.rerun()
+    if not go:
+        return
+
+    deps["update_newsletter"](nid, md)
+    meta = (
+        "Endometriosis Newsletter · Sent "
+        f"{datetime.now(timezone.utc).strftime('%B %d, %Y %H:%M UTC')}"
+    )
+    ok, fail = [], []
+    prog = st.progress(0.0, text="Sending…")
+    for i, r in enumerate(recips):
+        try:
+            deps["send_briefing"](
+                to_addr=r["email"],
+                subject=subject,
+                title=title,
+                meta=meta,
+                briefing_md=md,
+            )
+            deps["mark_recipient_sent"](r["id"])
+            ok.append(r)
+        except Exception as e:  # report every failure, keep going
+            fail.append((r, str(e)))
+        prog.progress((i + 1) / len(recips), text=f"{i + 1}/{len(recips)} sent…")
+    prog.empty()
+    st.session_state[_k(f"ed_sent_{nid}")] = {
+        "ok": [f"{r['name']} <{r['email']}>" for r in ok],
+        "fail": [f"{r['name']} — {e}" for r, e in fail],
+        "at": datetime.now(timezone.utc).strftime("%H:%M UTC"),
+    }
+    st.rerun()
+
+
+def _toggle_queue(deps: Dict[str, Any], nid: int, md: str, queued: bool) -> None:
+    if queued:
+        deps["set_nl_config"]("pending_newsletter_id", "")
+    else:
+        deps["update_newsletter"](nid, md)
+        deps["set_nl_config"]("pending_newsletter_id", str(nid))
+
+
 def render_editor_page(deps: Dict[str, Any]) -> None:
     preserve_state()
     st.button(
         "← Back to Build Newsletter from Intel Briefing",
-        key=_k("ed_back"),
+        key=_k("ed_back_btn"),
         on_click=_back_to_tab,
     )
     try:
@@ -1008,50 +1130,113 @@ def render_editor_page(deps: Dict[str, Any]) -> None:
 
     title = nl.get("title") or "Endometriosis Newsletter"
     saved_text = nl.get("content_md") or ""
-    st.markdown(f"## ✏️ {title}")
+    md_key, ver_key = _k(f"ed_md_{nid}"), _k(f"ed_ver_{nid}")
+    if md_key not in st.session_state:
+        st.session_state[md_key] = saved_text  # the canonical Markdown being edited
+        st.session_state[ver_key] = 0
+
+    st.markdown(f"## ✏️ {_esc(title)}", unsafe_allow_html=True)
+    pending = deps["get_nl_config"]("pending_newsletter_id", "")
+    queued = pending == str(nid)
     st.caption(
         f"Newsletter #{nid} · {nl.get('coverage_period') or ''} · last saved "
-        f"{(nl.get('updated_ts') or '')[:16].replace('T', ' ')} UTC · to send or "
-        "schedule it, open it in the Newsletter Builder tab."
+        f"{(nl.get('updated_ts') or '')[:16].replace('T', ' ')} UTC"
+        + (" · ⏳ queued for the next daily send" if queued else "")
     )
 
-    ed_key = _k(f"ed_text_{nid}")
-    if ed_key not in st.session_state:
-        st.session_state[ed_key] = saved_text
-    edited = st.session_state[ed_key]
+    sent = st.session_state.get(_k(f"ed_sent_{nid}"))
+    if sent:
+        if sent["ok"]:
+            st.success(f"✅ Sent at {sent['at']} to: " + ", ".join(sent["ok"]))
+        if sent["fail"]:
+            st.error("❌ Failed: " + "; ".join(sent["fail"]))
 
-    b1, b2, b3 = st.columns([1, 1, 3], vertical_alignment="center")
+    md = st.session_state[md_key]
+    dirty = md != saved_text
+    b1, b2, b3, b4, b5 = st.columns([1, 1, 1.25, 1.1, 1.4], vertical_alignment="center")
     with b1:
         if st.button(
-            "💾 Save changes",
+            "💾 Save",
             type="primary",
-            key=_k(f"ed_save_{nid}"),
-            disabled=edited == saved_text,
+            key=_k(f"ed_save_{nid}_btn"),
+            disabled=not dirty,
             use_container_width=True,
         ):
-            deps["update_newsletter"](nid, edited)
+            deps["update_newsletter"](nid, md)
             st.toast(f"Newsletter #{nid} saved.")
             st.rerun()
     with b2:
+        if st.button(
+            "📤 Send…",
+            key=_k(f"ed_send_{nid}_btn"),
+            use_container_width=True,
+            help="Email this newsletter now to newsletter subscribers",
+        ):
+            _send_dialog(deps, nid, title, md)
+    with b3:
+        st.button(
+            "✖ Unqueue daily send" if queued else "🕐 Send with daily briefing",
+            key=_k(f"ed_queue_{nid}_btn"),
+            on_click=_toggle_queue,
+            args=(deps, nid, md, queued),
+            use_container_width=True,
+            help=(
+                "Remove from the next daily send"
+                if queued
+                else (
+                    "Saves, then emails it to newsletter subscribers with the next "
+                    "scheduled daily briefing (Report Config sets the time)"
+                )
+            ),
+        )
+    with b4:
         st.download_button(
-            "⬇️ Download Markdown",
-            data=edited.encode("utf-8"),
+            "⬇️ Markdown",
+            data=md.encode("utf-8"),
             file_name=f"newsletter_{nid}.md",
             mime="text/markdown",
-            key=_k(f"ed_dl_{nid}"),
+            key=_k(f"ed_dl_{nid}_btn"),
             use_container_width=True,
         )
-    with b3:
-        if edited != saved_text:
-            st.caption("Unsaved changes")
+    with b5:
+        mode = (
+            st.segmented_control(
+                "Editor",
+                ["Visual", "Markdown"],
+                default="Visual",
+                key=_k("ed_mode"),
+                label_visibility="collapsed",
+            )
+            or "Visual"
+        )
+    if dirty:
+        st.caption("● Unsaved changes")
 
     e_col, p_col = st.columns(2, gap="medium")
+    ver = st.session_state[ver_key]
     with e_col:
-        st.text_area("Newsletter Markdown", height=760, key=ed_key)
+        if mode == "Visual":
+            new_md = tiptap_editor(md, doc_id=f"{nid}-{ver}", key=_k(f"tt_{nid}_{ver}"))
+            if new_md is not None and new_md != md:
+                st.session_state[md_key] = new_md
+                st.rerun()
+        else:
+            src = st.text_area(
+                "Newsletter Markdown",
+                value=md,
+                height=760,
+                key=_k(f"ed_src_{nid}_{ver}"),
+                label_visibility="collapsed",
+            )
+            if src != md:
+                st.session_state[md_key] = src
+                st.session_state[ver_key] = ver + 1  # visual editor reloads this text
+                st.rerun()
     with p_col:
+        st.caption("Email preview")
         html = deps["render_newsletter_html"](
             title,
             f"Endometriosis Newsletter · {nl.get('coverage_period') or ''}",
-            st.session_state[ed_key],
+            st.session_state[md_key],
         )
         deps["html_component"](html, height=780, scrolling=True)
