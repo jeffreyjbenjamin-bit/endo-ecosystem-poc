@@ -1,11 +1,16 @@
 """
 send_daily_briefing.py — CLI script for automated daily briefing and newsletter dispatch.
 
-Run this from a system scheduler (Windows Task Scheduler or cron) at the time
-configured in the Report Config tab.
+On Azure this runs automatically: scheduler.py (started by deploy/start.sh in the
+Docker image) checks every minute and runs this script with --auto-search when due.
+Elsewhere, run it from a system scheduler (Windows Task Scheduler or cron).
+
+A scheduled run sends once per day, from the time configured in the Report Config tab
+until 2 hours after it. The time is read in SEND_TIMEZONE (e.g. America/New_York),
+or the system's local time zone if that isn't set.
 
 Usage:
-    python send_daily_briefing.py              # sends if within ±10 min of configured time
+    python send_daily_briefing.py              # sends if due and not yet sent today
     python send_daily_briefing.py --force      # send immediately, ignore time check
     python send_daily_briefing.py --auto-search  # run AI search first, then send
 
@@ -27,6 +32,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sqlite3
 import sys
 from datetime import datetime, timezone
@@ -43,7 +49,29 @@ MAILING_LIST_DB = str(DATA_DIR / "mailing_list.sqlite")
 AI_SEARCH_DB = str(DATA_DIR / "ai_search_runs.sqlite")
 NEWSLETTERS_DB = str(DATA_DIR / "newsletters.sqlite")
 
-_WINDOW_MINUTES = 10
+# A scheduled (non --force) run sends once per day, starting at the configured time
+# and up to this many minutes after it (covers restarts and slow schedulers).
+_CATCH_UP_MINUTES = 120
+_LAST_SEND_KEY = "last_daily_send_date"
+
+
+def _send_tz():
+    """Time zone the configured send time is in (SEND_TIMEZONE, else system local)."""
+    name = os.getenv("SEND_TIMEZONE", "").strip()
+    if not name:
+        return None
+    try:
+        from zoneinfo import ZoneInfo
+
+        return ZoneInfo(name)
+    except Exception:
+        print(f"WARNING: unknown SEND_TIMEZONE {name!r}; using system local time.")
+        return None
+
+
+def _now() -> datetime:
+    tz = _send_tz()
+    return datetime.now(tz) if tz else datetime.now()
 
 
 # ── Config helpers ─────────────────────────────────────────────────────────────
@@ -64,10 +92,11 @@ def _get_config(key: str, default: str = "") -> str:
 
 
 def _set_config(key: str, value: str) -> None:
-    if not Path(MAILING_LIST_DB).exists():
-        return
     conn = sqlite3.connect(MAILING_LIST_DB)
     try:
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, value TEXT)"
+        )
         conn.execute(
             "INSERT INTO config (key, value) VALUES (?,?) "
             "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
@@ -166,15 +195,30 @@ def _load_newsletter(newsletter_id: int) -> dict | None:
 # ── Timing helper ──────────────────────────────────────────────────────────────
 
 
-def _is_send_time(configured_time: str, window_minutes: int) -> bool:
+def _is_send_time(configured_time: str, catch_up_minutes: int) -> bool:
+    """True from the configured time until `catch_up_minutes` after it (send time zone)."""
     try:
         cfg_h, cfg_m = [int(x) for x in configured_time.split(":")]
     except Exception:
         return False
-    now = datetime.now()
-    cfg_total = cfg_h * 60 + cfg_m
-    now_total = now.hour * 60 + now.minute
-    return abs(now_total - cfg_total) <= window_minutes
+    now = _now()
+    minutes_past = (now.hour * 60 + now.minute) - (cfg_h * 60 + cfg_m)
+    return 0 <= minutes_past <= catch_up_minutes
+
+
+def send_status() -> tuple[bool, str]:
+    """(due, reason) for a scheduled send right now. Used by this script and scheduler.py."""
+    configured_time = _get_config("daily_send_time", "07:00")
+    today = _now().strftime("%Y-%m-%d")
+    tz_label = os.getenv("SEND_TIMEZONE", "") or "local"
+    if _get_config(_LAST_SEND_KEY, "") == today:
+        return False, f"Already sent today ({today})."
+    if not _is_send_time(configured_time, _CATCH_UP_MINUTES):
+        return False, (
+            f"Not send time yet (configured: {configured_time} {tz_label}, "
+            f"now: {_now().strftime('%H:%M')})."
+        )
+    return True, f"Due: configured {configured_time} {tz_label}."
 
 
 # ── Auto AI search ─────────────────────────────────────────────────────────────
@@ -250,14 +294,11 @@ def _run_ai_search() -> bool:
 
 
 def main(force: bool = False, auto_search: bool = False) -> None:
-    configured_time = _get_config("daily_send_time", "07:00")
-
-    if not force and not _is_send_time(configured_time, _WINDOW_MINUTES):
-        print(
-            f"Not send time yet (configured: {configured_time} local, "
-            f"now: {datetime.now().strftime('%H:%M')}). Exiting."
-        )
-        return
+    if not force:
+        due, reason = send_status()
+        if not due:
+            print(f"{reason} Exiting.")
+            return
 
     if not smtp_configured():
         print(
@@ -265,11 +306,16 @@ def main(force: bool = False, auto_search: bool = False) -> None:
         )
         sys.exit(1)
 
+    if not force:
+        # Record today's send before sending, so a crash or partial failure
+        # can never cause the same day's emails to go out twice.
+        _set_config(_LAST_SEND_KEY, _now().strftime("%Y-%m-%d"))
+
     # Optionally run AI search to get fresh content
     if auto_search:
         _run_ai_search()
 
-    today = datetime.now().strftime("%B %d, %Y")
+    today = _now().strftime("%B %d, %Y")
     sent_utc = datetime.now(timezone.utc).strftime("%B %d, %Y %H:%M UTC")
 
     # ── Send AI Briefing to briefing subscribers ───────────────

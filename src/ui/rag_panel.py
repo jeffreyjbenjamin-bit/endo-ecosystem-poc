@@ -2749,17 +2749,30 @@ with tab_nl_config:
 
     _nlc_saved_time_obj = _dt_mod.time(_nlc_saved_h, _nlc_saved_m)
 
+    # Time zone the scheduled send uses (set in the Docker image on Azure)
+    _nlc_tz_name = os.getenv("SEND_TIMEZONE", "").strip()
+    _nlc_tz_label = {
+        "America/New_York": "US Eastern",
+        "America/Chicago": "US Central",
+        "America/Denver": "US Mountain",
+        "America/Los_Angeles": "US Pacific",
+    }.get(_nlc_tz_name, _nlc_tz_name or "server local time")
+    _nlc_auto = bool(_nlc_tz_name) and os.getenv(
+        "DAILY_SEND_ENABLED", "1"
+    ).strip().lower() not in ("0", "false", "no")
+    _nlc_last_send = get_nl_config("last_daily_send_date", "")
+
     _nlc_sched_col1, _nlc_sched_col2 = st.columns([2, 3], gap="medium")
     with _nlc_sched_col1:
         _nlc_send_time = st.time_input(
-            "Send time (your local time)",
+            f"Send time ({_nlc_tz_label})",
             value=_nlc_saved_time_obj,
             step=300,  # 5-minute increments
             key="nlc_send_time",
-            help="The time is interpreted as your local system time, not UTC.",
+            help=f"The time is interpreted in {_nlc_tz_label}.",
         )
         st.caption(
-            "⏰ Time is based on **your local time zone**. "
+            f"⏰ Time is in **{_nlc_tz_label}**. "
             "If you and your recipients are in different zones, "
             "keep this in mind when choosing the send time."
         )
@@ -2767,11 +2780,23 @@ with tab_nl_config:
         if st.button("💾 Save Schedule", key="nlc_save_sched"):
             set_nl_config("daily_send_time", _nlc_time_str)
             st.success(
-                f"Daily send time saved: **{_nlc_send_time.strftime('%I:%M %p')}** (local time)"
+                f"Daily send time saved: **{_nlc_send_time.strftime('%I:%M %p')}** ({_nlc_tz_label})"
             )
 
     with _nlc_sched_col2:
         _nlc_sched_display_time = _nlc_saved_time_str
+        if _nlc_auto:
+            _nlc_schedule_note = (
+                "Sends automatically every day at this time: a fresh AI Article "
+                "Search, then the Intelligence Briefing and any queued Newsletter. "
+                f"Last sent: {_nlc_last_send or 'not yet'}."
+            )
+        else:
+            _nlc_schedule_note = (
+                "To automate delivery at this time, run the included "
+                "<code>send_daily_briefing.py</code> script via a system scheduler "
+                "(Task Scheduler on Windows, cron on Mac/Linux)."
+            )
         try:
             _nlc_sched_display_time = _dt_mod.time(_nlc_saved_h, _nlc_saved_m).strftime(
                 "%I:%M %p"
@@ -2790,13 +2815,11 @@ with tab_nl_config:
                 {_nlc_sched_display_time}
               </div>
               <div style="font-size:12px;color:#7f8c8d">
-                Daily · Local time &nbsp;·&nbsp;
+                Daily · {_nlc_tz_label} &nbsp;·&nbsp;
                 {len(load_recipients())} recipient(s)
               </div>
               <div style="font-size:12px;color:#b0b8c4;margin-top:8px;line-height:1.5">
-                To automate delivery at this time, run the included
-                <code>send_daily_briefing.py</code> script via a system scheduler
-                (Task Scheduler on Windows, cron on Mac/Linux).
+                {_nlc_schedule_note}
               </div>
             </div>
             """,

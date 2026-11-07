@@ -19,9 +19,12 @@ RUN pip install --no-cache-dir -r requirements.txt
 # 5. Copy the rest of the repo
 COPY . .
 
-# 6. Streamlit server config
+# 6. Streamlit server config + daily send schedule (time in Report Config is US Eastern)
 ENV PORT=8501
+ENV SEND_TIMEZONE=America/New_York
+ENV DAILY_SEND_ENABLED=1
 EXPOSE 8501
 
-# 7. Launch the same panel as you run locally
-CMD ["streamlit", "run", "src/ui/rag_panel.py", "--server.port=8501", "--server.address=0.0.0.0"]
+# 7. Launch the daily-send scheduler and the same panel as you run locally
+RUN sed -i 's/\r$//' deploy/start.sh
+CMD ["sh", "deploy/start.sh"]
