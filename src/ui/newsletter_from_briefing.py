@@ -1,5 +1,5 @@
 """
-newsletter_from_briefing.py — "Newsletter Builder v2" tab.
+newsletter_from_briefing.py — "Build Newsletter from Intel Briefing" tab.
 
 Workflow
 --------
@@ -21,6 +21,7 @@ tab needs are passed in through `render_tab(...)`.
 from __future__ import annotations
 
 import hashlib
+import html as html_lib
 import json
 import re
 from datetime import datetime
@@ -368,28 +369,189 @@ relates to the featured story.
 """
 
 
-def _generate(deps: Dict[str, Any], user_msg: str) -> str:
+def _generate(
+    deps: Dict[str, Any], user_msg: str, system: str = _NB2_SYSTEM, max_tokens=4000
+) -> str:
     deploy = deps["chat_deployment"]
     client = deps["make_chat_client"](deploy)
     messages = [
-        {"role": "system", "content": _NB2_SYSTEM},
+        {"role": "system", "content": system},
         {"role": "user", "content": user_msg},
     ]
     try:
         resp = client.responses.create(
-            model=deploy, input=messages, max_output_tokens=4000
+            model=deploy, input=messages, max_output_tokens=max_tokens
         )
         return (resp.output_text or "").strip()
     except Exception:
         resp = client.chat.completions.create(
-            model=deploy, messages=messages, max_completion_tokens=4000
+            model=deploy, messages=messages, max_completion_tokens=max_tokens
         )
         return (resp.choices[0].message.content or "").strip()
 
 
 # ============================================================
-# UI sections
+# Why each similar article is related
 # ============================================================
+
+_REASON_SYSTEM = """\
+You explain to a medical newsletter editor why a candidate article is related to a \
+featured endometriosis article. Be specific: name the shared condition subtype, \
+intervention, biomarker, method, population or finding. If the link is weak or only \
+general, say so plainly. Use only the titles and summaries given. Reply with JSON only."""
+
+_STOPWORDS = set(
+    "a an and are as at be by for from in into is it its of on or that the their this "
+    "to with without via vs versus using use study studies patients women endometriosis "
+    "new among based between during after before review analysis".split()
+)
+
+
+def _keyword_reason(cand: Dict[str, Any], base: List[Dict[str, Any]]) -> str:
+    """Fallback when the model is unavailable: shared title/summary terms."""
+
+    def terms(a: Dict[str, Any]) -> Set[str]:
+        words = re.findall(
+            r"[a-z][a-z0-9\-]{3,}", (a["title"] + " " + a.get("snippet", "")).lower()
+        )
+        return {w for w in words if w not in _STOPWORDS}
+
+    ct = terms(cand)
+    best: Tuple[int, List[str]] = (0, [])
+    for b in base:
+        if b["ref"] in cand.get("matched", []):
+            shared = sorted(ct & terms(b), key=len, reverse=True)[:4]
+            if len(shared) > best[0]:
+                best = (len(shared), shared)
+    if best[1]:
+        return "Shares key terms with the featured article: " + ", ".join(best[1]) + "."
+    return "Similar overall topic to the featured article."
+
+
+def _explain_matches(
+    deps: Dict[str, Any], base: List[Dict[str, Any]], results: List[Dict[str, Any]]
+) -> None:
+    """Add a short 'reason' to each result explaining how it relates to its featured article."""
+    featured = "\n".join(
+        f"[{b['ref']}] {b['title']} — {(b.get('snippet') or '')[:300]}" for b in base
+    )
+    for start in range(0, len(results), 25):
+        chunk = results[start : start + 25]
+        cands = "\n".join(
+            f"C{i} (similar to {', '.join(f'[{m}]' for m in r.get('matched', []))}): "
+            f"{r['title']} — {(r.get('snippet') or '')[:300]}"
+            for i, r in enumerate(chunk)
+        )
+        prompt = (
+            f"FEATURED ARTICLES:\n{featured}\n\nCANDIDATES:\n{cands}\n\n"
+            'Return a JSON object mapping each candidate id ("C0", "C1", ...) to one '
+            "sentence of at most 25 words saying how it relates to the featured article "
+            "it is similar to."
+        )
+        reasons: Dict[str, str] = {}
+        try:
+            text = _generate(deps, prompt, system=_REASON_SYSTEM, max_tokens=2500)
+            m = re.search(r"\{.*\}", text, re.S)
+            reasons = json.loads(m.group(0)) if m else {}
+        except Exception:
+            reasons = {}
+        for i, r in enumerate(chunk):
+            reason = str(reasons.get(f"C{i}", "")).strip()
+            r["reason"] = reason or _keyword_reason(r, base)
+            r["reason_source"] = "model" if reason else "keywords"
+
+
+# ============================================================
+# UI
+# ============================================================
+
+_DOMAIN_BADGES = {
+    "pubmed": ("PubMed", "badge-pubmed"),
+    "ncbi.nlm.nih.gov": ("PubMed", "badge-pubmed"),
+    "europepmc": ("PubMed", "badge-pubmed"),
+    "clinicaltrials": ("ClinicalTrials", "badge-ctgov"),
+    "ctgov": ("ClinicalTrials", "badge-ctgov"),
+    "medrxiv": ("medRxiv", "badge-medrxiv"),
+    "biorxiv": ("bioRxiv", "badge-biorxiv"),
+    "semantic": ("Semantic Scholar", "badge-semantic_scholar"),
+    "openalex": ("OpenAlex", "badge-openalex"),
+    "crossref": ("Crossref", "badge-crossref"),
+    "doi.org": ("Crossref", "badge-crossref"),
+    "nih_reporter": ("NIH Reporter", "badge-nih_reporter"),
+    "reporter.nih": ("NIH Reporter", "badge-nih_reporter"),
+    "fda": ("FDA", "badge-default"),
+    "ema": ("EMA", "badge-default"),
+}
+
+
+def _badge(source: str) -> Tuple[str, str]:
+    s = (source or "").lower()
+    for needle, val in _DOMAIN_BADGES.items():
+        if needle in s:
+            return val
+    return ("Web", "badge-web_search")
+
+
+def _esc(s: str) -> str:
+    return html_lib.escape(str(s or ""), quote=True)
+
+
+def _card_html(a: Dict[str, Any], right_label: str, extra_html: str = "") -> str:
+    label, cls = _badge(a.get("source", ""))
+    url = _esc(a.get("url", ""))
+    title = _esc(a["title"])
+    title_html = (
+        f'<a href="{url}" target="_blank" rel="noopener">{title}</a>' if url else title
+    )
+    meta = " &nbsp;·&nbsp; ".join(
+        _esc(x)
+        for x in [a.get("published_date") or "date unknown", a.get("source")]
+        if x
+    )
+    excerpt = _esc((a.get("snippet") or "").replace("\n", " ")[:500])
+    return (
+        f'<div><span class="endo-badge {cls}">{label}</span>'
+        f'<span class="endo-quality">{right_label}</span></div>'
+        f'<div class="endo-title">{title_html}</div>'
+        f'<div class="endo-meta">{meta}</div>'
+        f"{extra_html}"
+        f'<div class="endo-excerpt nb2-excerpt">{excerpt}</div>'
+    )
+
+
+def _css(flyout_open: bool, selected_keys: List[str]) -> str:
+    tile_sel = "".join(
+        f".st-key-nb2_tile_{k} {{ border:2px solid #1F6FEB !important; "
+        f"background:#f4f8ff !important; }}"
+        for k in selected_keys
+    )
+    pad = (
+        """
+        @media (min-width: 1280px) {
+          [data-baseweb="tab-panel"]:has(.st-key-nb2_flyout) { padding-right: 470px; }
+        }"""
+        if flyout_open
+        else ""
+    )
+    return f"""<style>
+      [class*="st-key-nb2_tile_"], [class*="st-key-nb2_res_"] {{
+        background:#ffffff; border:1px solid #e4e9f0; border-radius:10px;
+        padding:14px 16px 6px 16px; box-shadow:0 2px 6px rgba(0,0,0,0.05);
+        gap: 0.25rem;
+      }}
+      [class*="st-key-nb2_tile_"]:hover {{ box-shadow:0 4px 16px rgba(0,0,0,0.10); }}
+      .nb2-excerpt {{ -webkit-line-clamp:3 !important; margin-bottom:4px !important; }}
+      .nb2-reason {{ font-size:0.84rem; color:#0d2137; background:#eef5ff;
+        border-left:3px solid #1F6FEB; border-radius:4px; padding:6px 9px; margin:6px 0 8px 0; }}
+      .st-key-nb2_flyout {{
+        position:fixed; top:60px; right:0; bottom:52px; width:min(450px, 100vw);
+        z-index:999; background:#f8faff; border-left:1px solid #dde4ef;
+        box-shadow:-8px 0 24px rgba(0,0,0,0.12); padding:16px 18px;
+        overflow-y:auto; display:block;
+      }}
+      .st-key-nb2_flyout [class*="st-key-nb2_res_"] {{ margin-bottom:10px; }}
+      {tile_sel}{pad}
+    </style>"""
 
 
 def _on_toggle_supporting(article: Dict[str, Any], cb_key: str) -> None:
@@ -400,34 +562,124 @@ def _on_toggle_supporting(article: Dict[str, Any], cb_key: str) -> None:
         sup.pop(article["key"], None)
 
 
-def _render_result(a: Dict[str, Any], sig: str) -> None:
-    cb_key = _k(f"sup_cb_{sig}_{a['key']}")
-    if cb_key not in st.session_state:
-        st.session_state[cb_key] = a["key"] in st.session_state[_k("supporting")]
-    with st.container(border=True):
-        c1, c2 = st.columns([0.06, 0.94])
-        with c1:
-            st.checkbox(
-                "Include",
-                key=cb_key,
-                label_visibility="collapsed",
-                on_change=_on_toggle_supporting,
-                args=(a, cb_key),
+def _set_flyout(open_: bool) -> None:
+    st.session_state[_k("flyout_open")] = open_
+
+
+def _run_search(
+    base: List[Dict[str, Any]],
+    articles: List[Dict[str, Any]],
+    opts: Dict[str, Any],
+    deps: Dict[str, Any],
+) -> None:
+    results: List[Dict[str, Any]] = []
+    errors: List[str] = []
+    where = opts["where"]
+    with st.spinner("Finding similar articles…"):
+        if where in ("Evidence library + Web", "Evidence library"):
+            try:
+                results += _library_search(
+                    base, opts["per_article"], opts["keywords"], deps
+                )
+            except Exception as e:
+                errors.append(f"Evidence library: {e}")
+        if where in ("Evidence library + Web", "Web"):
+            try:
+                briefing_urls = {_url_key(a["url"]) for a in articles}
+                web, werrs = _web_search(
+                    base,
+                    opts["per_article"],
+                    opts["keywords"],
+                    opts["web_days"],
+                    briefing_urls,
+                )
+                results += web
+                errors += [f"Web: {x}" for x in werrs]
+            except Exception as e:
+                errors.append(f"Web: {e}")
+    if results:
+        with st.spinner(f"Explaining how {len(results)} articles are related…"):
+            _explain_matches(deps, base, results)
+    st.session_state[_k("results")] = results
+    st.session_state[_k("results_sig")] = opts["sig"]
+    st.session_state[_k("search_errors")] = errors
+    st.session_state[_k("flyout_open")] = True
+
+
+def _render_flyout(base: List[Dict[str, Any]], sig: str) -> None:
+    results = st.session_state[_k("results")]
+    res_sig = st.session_state[_k("results_sig")]
+    with st.container(key="nb2_flyout"):
+        h1, h2 = st.columns([0.8, 0.2], vertical_alignment="center")
+        with h1:
+            st.markdown(f"#### Similar articles ({len(results)})")
+        with h2:
+            st.button(
+                "✕",
+                key=_k("close_flyout"),
+                on_click=_set_flyout,
+                args=(False,),
+                help="Close",
             )
-        with c2:
-            st.markdown(_article_header_md(a), unsafe_allow_html=True)
-            tags = [
-                "📚 Evidence library" if a["origin"] == "library" else "🌐 Web",
-                "Similar to " + ", ".join(f"[{m}]" for m in a.get("matched", [])),
-            ]
-            if a.get("score") is not None:
-                tags.append(f"similarity {a['score']:.2f}")
-            if a.get("in_briefing"):
-                tags.append("also in this briefing")
-            st.caption(" · ".join(tags))
-            if a.get("snippet"):
-                snip = a["snippet"]
-                st.write(snip[:400] + ("…" if len(snip) > 400 else ""))
+        st.caption(
+            "Similar to: " + "; ".join(f"[{b['ref']}] {b['title']}" for b in base)
+        )
+        if res_sig != sig:
+            st.info(
+                "Your featured articles or search options changed. Click "
+                "**Find similar articles** to refresh."
+            )
+        for err in st.session_state[_k("search_errors")]:
+            st.warning(err)
+        if not results:
+            st.info("No similar articles found. Try different keywords or sources.")
+            return
+
+        origins = sorted({r["origin"] for r in results})
+        show = "All"
+        if len(origins) > 1:
+            show = st.radio(
+                "Show",
+                ["All", "Evidence library", "Web"],
+                horizontal=True,
+                key=_k("origin_filter"),
+                label_visibility="collapsed",
+            )
+        view = [
+            r
+            for r in results
+            if show == "All"
+            or (r["origin"] == "library") == (show == "Evidence library")
+        ]
+        n_sup = len(st.session_state[_k("supporting")])
+        st.caption(f"Tick to add as supporting · {n_sup} selected")
+
+        for r in view:
+            cb_key = _k(f"sup_cb_{r['key']}")
+            if cb_key not in st.session_state:
+                st.session_state[cb_key] = (
+                    r["key"] in st.session_state[_k("supporting")]
+                )
+            right = (
+                f"Similarity {r['score']:.0%}"
+                if r.get("score") is not None
+                else f"Web result #{r.get('rank', '')}"
+            )
+            reason = _esc(r.get("reason", ""))
+            matched = ", ".join(f"[{m}]" for m in r.get("matched", []))
+            reason_html = (
+                f'<div class="nb2-reason"><b>Why it\'s related to {matched}:</b> {reason}</div>'
+                if reason
+                else ""
+            )
+            with st.container(key=f"nb2_res_{r['key']}"):
+                st.markdown(_card_html(r, right, reason_html), unsafe_allow_html=True)
+                st.checkbox(
+                    "Add as supporting article",
+                    key=cb_key,
+                    on_change=_on_toggle_supporting,
+                    args=(r, cb_key),
+                )
 
 
 def render_tab(deps: Dict[str, Any]) -> None:
@@ -440,13 +692,8 @@ def render_tab(deps: Dict[str, Any]) -> None:
       html_component(html, height, scrolling)
     """
     _init_state()
-
-    st.markdown("### 🆕 Newsletter Builder v2")
-    st.caption(
-        "Start a newsletter from a past Intelligence Briefing: pick one or two of its "
-        "articles, find similar articles, and choose supporting ones. The "
-        "Intelligence Briefing itself is not changed."
-    )
+    if _k("flyout_open") not in st.session_state:
+        st.session_state[_k("flyout_open")] = False
 
     runs = deps["load_ai_runs"](50)
     if not runs:
@@ -455,213 +702,170 @@ def render_tab(deps: Dict[str, Any]) -> None:
         )
         return
 
-    # ── Step 1: pick briefing ──────────────────────────────────
-    st.markdown("#### 1 · Intelligence Briefing")
+    # ── Top bar: briefing picker · Find similar · search options ──
     run_by_id = {r["id"]: r for r in runs}
-    run_id = st.selectbox(
-        "Intelligence Briefing",
-        options=list(run_by_id.keys()),
-        index=0,
-        format_func=lambda rid: _run_label(run_by_id[rid])
-        + ("  (most recent)" if rid == runs[0]["id"] else ""),
-        key=_k("run_id"),
+    top1, top2, top3, top4 = st.columns(
+        [3.2, 1.5, 0.9, 0.5], vertical_alignment="bottom"
     )
+    with top1:
+        run_id = st.selectbox(
+            "Intelligence Briefing",
+            options=list(run_by_id.keys()),
+            index=0,
+            format_func=lambda rid: _run_label(run_by_id[rid])
+            + ("  (most recent)" if rid == runs[0]["id"] else ""),
+            key=_k("run_id"),
+        )
     run = run_by_id[run_id]
     if st.session_state[_k("active_run")] != run_id:
-        # New briefing → reset similar-article results; keep chosen supporting articles
+        # New briefing → clear old results; keep chosen supporting articles
         st.session_state[_k("active_run")] = run_id
         st.session_state[_k("results")] = []
         st.session_state[_k("results_sig")] = None
+        st.session_state[_k("flyout_open")] = False
 
-    with st.expander("View briefing text"):
-        st.markdown(run.get("briefing_text") or "_(empty)_")
-
-    # ── Step 2: pick 1–2 base articles ─────────────────────────
     articles = _briefing_articles(run)
-    st.markdown("#### 2 · Choose the featured article(s)")
+    base_key = lambda a: _k(f"base_{a['key']}")  # noqa: E731
+    base = [a for a in articles if st.session_state.get(base_key(a))]
+    n_base = len(base)
+
+    with top4:
+        with st.popover("⚙️", help="Search options"):
+            where = st.radio(
+                "Search in",
+                ["Evidence library + Web", "Evidence library", "Web"],
+                key=_k("where"),
+                help="Evidence library = the app's ingested corpus (PubMed, "
+                "ClinicalTrials.gov, bioRxiv, FDA, …) searched by meaning. Web = the "
+                "same search provider as AI Article Search.",
+            )
+            per_article = st.slider(
+                "Results per featured article", 5, 20, 10, key=_k("per_article")
+            )
+            web_days = st.selectbox(
+                "Web recency",
+                [30, 90, 365, 1825],
+                index=2,
+                format_func=lambda d: {30: "30 days", 90: "90 days", 365: "1 year"}.get(
+                    d, "5 years"
+                ),
+                key=_k("web_days"),
+                disabled=where == "Evidence library",
+            )
+            keywords = st.text_input(
+                "Keywords to steer the search",
+                key=_k("keywords"),
+                placeholder="e.g. adolescents, biomarkers",
+            )
+    sig = _hash(
+        "|".join(sorted(b["key"] for b in base))
+        + f"|{where}|{per_article}|{web_days}|{keywords}"
+    )
+    with top2:
+        find = st.button(
+            f"🔎 Find similar articles ({n_base})",
+            type="primary",
+            disabled=n_base == 0,
+            use_container_width=True,
+            key=_k("search_btn"),
+            help="Select 1–2 articles below first" if n_base == 0 else None,
+        )
+    with top3:
+        n_res = len(st.session_state[_k("results")])
+        if n_res and not st.session_state[_k("flyout_open")]:
+            st.button(
+                f"Show results ({n_res})",
+                key=_k("show_flyout"),
+                on_click=_set_flyout,
+                args=(True,),
+                use_container_width=True,
+            )
+
+    if find and base:
+        _run_search(
+            base,
+            articles,
+            {
+                "where": where,
+                "per_article": per_article,
+                "web_days": web_days,
+                "keywords": keywords,
+                "sig": sig,
+            },
+            deps,
+        )
+
+    flyout_open = bool(st.session_state[_k("flyout_open")]) and bool(base)
+    st.markdown(_css(flyout_open, [a["key"] for a in base]), unsafe_allow_html=True)
+
+    # ── Article tiles ──────────────────────────────────────────
     if not articles:
         st.warning("This briefing has no stored articles.")
         return
+    c1, c2, c3 = st.columns([2.2, 1.6, 1], vertical_alignment="center")
+    with c1:
+        st.caption(
+            f"**Choose up to {MAX_BASE_ARTICLES} articles to feature** · {n_base} selected · "
+            f"{sum(a['cited'] for a in articles)} of {len(articles)} cited in the briefing text"
+        )
+    with c2:
+        only_cited = st.toggle(
+            "Only articles cited in the briefing", value=False, key=_k("only_cited")
+        )
+    with c3:
+        with st.popover("View briefing text", use_container_width=True):
+            st.markdown(run.get("briefing_text") or "_(empty)_")
 
-    only_cited = st.toggle(
-        "Only show articles cited in the briefing text",
-        value=False,
-        key=_k("only_cited"),
-    )
-    base_key = lambda a: _k(f"base_{a['key']}")  # noqa: E731
-    # Keep already-selected articles visible so the filter never drops a selection
     shown = [
         a
         for a in articles
         if a["cited"] or not only_cited or st.session_state.get(base_key(a))
     ]
-    n_base = sum(1 for a in articles if st.session_state.get(base_key(a)))
-    st.caption(
-        f"Select up to {MAX_BASE_ARTICLES}. {n_base} selected · "
-        f"{sum(a['cited'] for a in articles)} of {len(articles)} articles are cited "
-        "in the briefing text."
-    )
+    n_cols = 2 if flyout_open else 3
+    for row_start in range(0, len(shown), n_cols):
+        cols = st.columns(n_cols, gap="small")
+        for col, a in zip(cols, shown[row_start : row_start + n_cols]):
+            checked = bool(st.session_state.get(base_key(a)))
+            right = f"[{a['ref']}]" + (" · Cited" if a["cited"] else "")
+            if a.get("score") is not None:
+                right += f" · Score {a['score']:.0%}"
+            with col:
+                with st.container(key=f"nb2_tile_{a['key']}"):
+                    st.markdown(_card_html(a, right), unsafe_allow_html=True)
+                    st.checkbox(
+                        "Feature this article",
+                        key=base_key(a),
+                        disabled=(not checked and n_base >= MAX_BASE_ARTICLES),
+                    )
 
-    for a in shown:
-        checked = bool(st.session_state.get(base_key(a)))
-        with st.container(border=True):
-            c1, c2 = st.columns([0.06, 0.94])
-            with c1:
-                st.checkbox(
-                    "Feature",
-                    key=base_key(a),
-                    label_visibility="collapsed",
-                    disabled=(not checked and n_base >= MAX_BASE_ARTICLES),
-                )
-            with c2:
-                st.markdown(
-                    f"`[{a['ref']}]` " + _article_header_md(a), unsafe_allow_html=True
-                )
-                tags = ["✅ Cited in briefing" if a["cited"] else "Not cited in text"]
-                if a.get("score") is not None:
-                    tags.append(f"briefing score {a['score']:.2f}")
-                st.caption(" · ".join(tags))
-                if a["snippet"]:
-                    st.write(a["snippet"])
+    if flyout_open:
+        _render_flyout(base, sig)
 
-    base = [a for a in articles if st.session_state.get(base_key(a))]
     if not base:
-        st.info("Select one or two articles above to continue.")
         return
 
-    # ── Step 3: find similar articles ──────────────────────────
-    st.markdown("#### 3 · Find similar articles")
-    st.markdown(
-        "Featured: " + "; ".join(f"**[{b['ref']}]** {b['title']}" for b in base)
-    )
-
-    c1, c2, c3 = st.columns([1.4, 1, 1])
-    with c1:
-        where = st.radio(
-            "Search in",
-            ["Evidence library + Web", "Evidence library", "Web"],
-            horizontal=True,
-            key=_k("where"),
-            help="Evidence library = the app's ingested corpus (PubMed, ClinicalTrials.gov, "
-            "bioRxiv, FDA, …) searched by meaning. Web = the same search provider as AI "
-            "Article Search.",
-        )
-    with c2:
-        per_article = st.slider(
-            "Results per featured article", 5, 20, 10, key=_k("per_article")
-        )
-    with c3:
-        web_days = st.selectbox(
-            "Web recency",
-            [30, 90, 365, 1825],
-            index=2,
-            format_func=lambda d: {30: "30 days", 90: "90 days", 365: "1 year"}.get(
-                d, "5 years"
-            ),
-            key=_k("web_days"),
-            disabled=where == "Evidence library",
-        )
-    keywords = st.text_input(
-        "Optional keywords to steer the search",
-        key=_k("keywords"),
-        placeholder="e.g. adolescents, biomarkers, phase 3",
-    )
-
-    sig = _hash(
-        "|".join(sorted(b["key"] for b in base))
-        + f"|{where}|{per_article}|{web_days}|{keywords}"
-    )
-    if st.button("🔎 Find similar articles", type="primary", key=_k("search_btn")):
-        results: List[Dict[str, Any]] = []
-        errors: List[str] = []
-        with st.spinner("Searching…"):
-            if where in ("Evidence library + Web", "Evidence library"):
-                try:
-                    results += _library_search(base, per_article, keywords, deps)
-                except Exception as e:
-                    errors.append(f"Evidence library: {e}")
-            if where in ("Evidence library + Web", "Web"):
-                try:
-                    briefing_urls = {_url_key(a["url"]) for a in articles}
-                    web, werrs = _web_search(
-                        base, per_article, keywords, web_days, briefing_urls
-                    )
-                    results += web
-                    errors += [f"Web: {x}" for x in werrs]
-                except Exception as e:
-                    errors.append(f"Web: {e}")
-        st.session_state[_k("results")] = results
-        st.session_state[_k("results_sig")] = sig
-        st.session_state[_k("search_errors")] = errors
-
-    for err in st.session_state[_k("search_errors")]:
-        st.warning(err)
-
-    results = st.session_state[_k("results")]
-    res_sig = st.session_state[_k("results_sig")]
-    if res_sig and res_sig != sig:
-        st.caption(
-            "Results below are from your previous search settings — "
-            "click Find similar articles to refresh."
-        )
-    if results:
-        origins = sorted({r["origin"] for r in results})
-        f1, f2 = st.columns([1, 1])
-        with f1:
-            origin_filter = st.radio(
-                "Show",
-                ["All"]
-                + [("Evidence library" if o == "library" else "Web") for o in origins],
-                horizontal=True,
-                key=_k("origin_filter"),
-            )
-        with f2:
-            text_filter = st.text_input(
-                "Filter results",
-                key=_k("text_filter"),
-                placeholder="word in title or summary",
-            )
-        view = results
-        if origin_filter == "Evidence library":
-            view = [r for r in view if r["origin"] == "library"]
-        elif origin_filter == "Web":
-            view = [r for r in view if r["origin"] == "web"]
-        if text_filter:
-            tf = text_filter.lower()
-            view = [
-                r
-                for r in view
-                if tf in (r["title"] + " " + r.get("snippet", "")).lower()
-            ]
-        st.caption(f"{len(view)} of {len(results)} results · tick to add as supporting")
-        for r in view:
-            _render_result(r, res_sig or sig)
-    elif res_sig:
-        st.info("No similar articles found. Try different keywords or sources.")
-
-    # ── Selected supporting articles ───────────────────────────
+    # ── Supporting articles + build ────────────────────────────
     supporting: List[Dict[str, Any]] = list(st.session_state[_k("supporting")].values())
-    st.markdown(f"#### 4 · Supporting articles ({len(supporting)} selected)")
+    st.markdown("---")
+    st.markdown(f"#### Supporting articles ({len(supporting)})")
     if supporting:
         for a in supporting:
-            s1, s2 = st.columns([0.88, 0.12])
+            s1, s2 = st.columns([0.9, 0.1], vertical_alignment="center")
             with s1:
                 st.markdown(_article_header_md(a), unsafe_allow_html=True)
             with s2:
                 if st.button("Remove", key=_k(f"rm_{a['key']}")):
                     st.session_state[_k("supporting")].pop(a["key"], None)
-                    for k in list(st.session_state.keys()):
-                        if k.startswith(_k("sup_cb_")) and k.endswith(a["key"]):
-                            del st.session_state[k]
+                    st.session_state.pop(_k(f"sup_cb_{a['key']}"), None)
                     st.rerun()
     else:
         st.caption(
-            "None yet. You can also generate with the featured article(s) alone."
+            "None yet: use **Find similar articles** at the top and tick the ones to "
+            "include. You can also generate with the featured article(s) alone."
         )
 
-    # ── Step 5: generate newsletter ────────────────────────────
-    st.markdown("#### 5 · Build the newsletter")
-    g1, g2 = st.columns([1, 1])
+    st.markdown("#### Build the newsletter")
+    g1, g2, g3 = st.columns([1.2, 1.6, 0.9], vertical_alignment="bottom")
     with g1:
         nl_title = st.text_input(
             "Newsletter title", value="Endometriosis Newsletter", key=_k("title")
@@ -672,8 +876,15 @@ def render_tab(deps: Dict[str, Any]) -> None:
             key=_k("note"),
             placeholder="e.g. audience is clinicians; keep it under 600 words",
         )
+    with g3:
+        gen = st.button(
+            "📰 Generate Newsletter",
+            type="primary",
+            key=_k("gen_btn"),
+            use_container_width=True,
+        )
 
-    if st.button("📰 Generate Newsletter", type="primary", key=_k("gen_btn")):
+    if gen:
         prompt = _build_prompt(base, supporting, nl_title, _run_label(run), nl_note)
         with st.spinner("Writing newsletter…"):
             try:
@@ -690,6 +901,7 @@ def render_tab(deps: Dict[str, Any]) -> None:
                     "url": a["url"],
                     "source": a.get("source", ""),
                     "published_date": a.get("published_date", ""),
+                    "reason": a.get("reason", ""),
                 }
                 for i, a in enumerate(base + supporting)
             ]
@@ -708,6 +920,7 @@ def render_tab(deps: Dict[str, Any]) -> None:
             st.session_state[_k("draft")] = text
             st.session_state[_k("saved_id")] = sid
             st.session_state[_k("editor")] = text
+            st.session_state[_k("flyout_open")] = False
             st.rerun()
 
     draft = st.session_state[_k("draft")]

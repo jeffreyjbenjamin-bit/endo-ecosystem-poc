@@ -6,7 +6,7 @@ Changelog link. The link switches the view inside the current session (no page
 reload, so the password isn't asked again) and sets ?view=changelog in the URL,
 which also opens the page directly.
 
-The version shown is the first "## [x.y.z]" heading in CHANGELOG.md.
+The version shown is the version in the first row of the CHANGELOG.md table.
 """
 
 from __future__ import annotations
@@ -54,7 +54,7 @@ _FOOTER_CSS = """
 def app_version() -> str:
     try:
         m = re.search(
-            r"^## \[(\d+\.\d+\.\d+)\]",
+            r"^\|\s*(\d+\.\d+\.\d+)\s*\|",
             CHANGELOG_PATH.read_text(encoding="utf-8"),
             re.M,
         )
@@ -104,4 +104,9 @@ def render_changelog_page() -> None:
     except OSError:
         st.error("Changelog not found.")
         return
+    st.markdown(
+        "<style>[data-testid='stMarkdownContainer'] table td:nth-child(-n+3)"
+        "{white-space:nowrap}</style>",
+        unsafe_allow_html=True,
+    )
     st.markdown(re.sub(r"<!--.*?-->", "", text, flags=re.S))
