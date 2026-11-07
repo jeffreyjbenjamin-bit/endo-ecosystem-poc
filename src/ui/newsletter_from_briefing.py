@@ -70,6 +70,16 @@ def _init_state() -> None:
         ("draft", ""),
         ("saved_id", None),
         ("active_run", None),
+        ("flyout_open", False),
+        # Widget defaults live here (not in the widgets' value=/index= arguments) so
+        # preserve_state() can re-apply remembered values without Streamlit warnings.
+        ("where", "Evidence library + Web"),
+        ("per_article", 10),
+        ("web_days", 365),
+        ("keywords", ""),
+        ("only_cited", False),
+        ("title", "Endometriosis Newsletter"),
+        ("note", ""),
     ]:
         if _k(name) not in st.session_state:
             st.session_state[_k(name)] = default
@@ -692,18 +702,20 @@ def render_tab(deps: Dict[str, Any]) -> None:
       html_component(html, height, scrolling)
     """
     _init_state()
-    if _k("flyout_open") not in st.session_state:
-        st.session_state[_k("flyout_open")] = False
+    # Push remembered selections to the browser (see preserve_state)
+    preserve_state()
 
     runs = deps["load_ai_runs"](50)
     if not runs:
         st.info(
-            "No Intelligence Briefings yet. Run one in the AI Article Search tab first."
+            "No Intelligence Briefings yet. Run one in the Build Intelligence Briefing tab first."
         )
         return
 
     # ── Top bar: briefing picker · Find similar · search options ──
     run_by_id = {r["id"]: r for r in runs}
+    if st.session_state.get(_k("run_id")) not in run_by_id:
+        st.session_state[_k("run_id")] = runs[0]["id"]  # default: most recent
     top1, top2, top3, top4 = st.columns(
         [3.2, 1.5, 0.9, 0.5], vertical_alignment="bottom"
     )
@@ -711,7 +723,6 @@ def render_tab(deps: Dict[str, Any]) -> None:
         run_id = st.selectbox(
             "Intelligence Briefing",
             options=list(run_by_id.keys()),
-            index=0,
             format_func=lambda rid: _run_label(run_by_id[rid])
             + ("  (most recent)" if rid == runs[0]["id"] else ""),
             key=_k("run_id"),
@@ -737,15 +748,14 @@ def render_tab(deps: Dict[str, Any]) -> None:
                 key=_k("where"),
                 help="Evidence library = the app's ingested corpus (PubMed, "
                 "ClinicalTrials.gov, bioRxiv, FDA, …) searched by meaning. Web = the "
-                "same search provider as AI Article Search.",
+                "same search provider as Build Intelligence Briefing.",
             )
             per_article = st.slider(
-                "Results per featured article", 5, 20, 10, key=_k("per_article")
+                "Results per featured article", 5, 20, key=_k("per_article")
             )
             web_days = st.selectbox(
                 "Web recency",
                 [30, 90, 365, 1825],
-                index=2,
                 format_func=lambda d: {30: "30 days", 90: "90 days", 365: "1 year"}.get(
                     d, "5 years"
                 ),
@@ -798,10 +808,64 @@ def render_tab(deps: Dict[str, Any]) -> None:
     flyout_open = bool(st.session_state[_k("flyout_open")]) and bool(base)
     st.markdown(_css(flyout_open, [a["key"] for a in base]), unsafe_allow_html=True)
 
-    # ── Article tiles ──────────────────────────────────────────
     if not articles:
         st.warning("This briefing has no stored articles.")
         return
+
+    # ── Build panel (top): featured, supporting, title, Generate ──
+    supporting: List[Dict[str, Any]] = list(st.session_state[_k("supporting")].values())
+    with st.container(border=True, key="nb2_build"):
+        if not base:
+            st.markdown(
+                "**📰 Build a newsletter** — feature 1–2 articles from the briefing "
+                "below, then use **Find similar articles** to pick supporting ones."
+            )
+        else:
+            left, right = st.columns([1.35, 1], gap="large")
+            with left:
+                st.markdown(
+                    "**Featured:** "
+                    + " &nbsp;·&nbsp; ".join(
+                        f"[{b['ref']}] {_esc(b['title'])}" for b in base
+                    ),
+                    unsafe_allow_html=True,
+                )
+                st.markdown(f"**Supporting articles ({len(supporting)})**")
+                if not supporting:
+                    st.caption(
+                        "None yet: click **Find similar articles** and tick the ones to "
+                        "include. You can also generate from the featured article(s) alone."
+                    )
+                for a in supporting:
+                    s1, s2 = st.columns([0.92, 0.08], vertical_alignment="center")
+                    with s1:
+                        st.markdown(_article_header_md(a), unsafe_allow_html=True)
+                    with s2:
+                        if st.button("✕", key=_k(f"rm_{a['key']}"), help="Remove"):
+                            st.session_state[_k("supporting")].pop(a["key"], None)
+                            st.session_state.pop(_k(f"sup_cb_{a['key']}"), None)
+                            st.rerun()
+            with right:
+                nl_title = st.text_input(
+                    "Newsletter title",
+                    key=_k("title"),
+                )
+                nl_note = st.text_input(
+                    "Editorial note (optional)",
+                    key=_k("note"),
+                    placeholder="e.g. audience is clinicians; under 600 words",
+                )
+                gen = st.button(
+                    f"📰 Generate Newsletter ({len(base)} featured + "
+                    f"{len(supporting)} supporting)",
+                    type="primary",
+                    key=_k("gen_btn"),
+                    use_container_width=True,
+                )
+            if gen:
+                _generate_and_open(deps, run, base, supporting, nl_title, nl_note)
+
+    # ── Article tiles ──────────────────────────────────────────
     c1, c2, c3 = st.columns([2.2, 1.6, 1], vertical_alignment="center")
     with c1:
         st.caption(
@@ -810,7 +874,7 @@ def render_tab(deps: Dict[str, Any]) -> None:
         )
     with c2:
         only_cited = st.toggle(
-            "Only articles cited in the briefing", value=False, key=_k("only_cited")
+            "Only articles cited in the briefing", key=_k("only_cited")
         )
     with c3:
         with st.popover("View briefing text", use_container_width=True):
@@ -826,12 +890,12 @@ def render_tab(deps: Dict[str, Any]) -> None:
         cols = st.columns(n_cols, gap="small")
         for col, a in zip(cols, shown[row_start : row_start + n_cols]):
             checked = bool(st.session_state.get(base_key(a)))
-            right = f"[{a['ref']}]" + (" · Cited" if a["cited"] else "")
+            right_label = f"[{a['ref']}]" + (" · Cited" if a["cited"] else "")
             if a.get("score") is not None:
-                right += f" · Score {a['score']:.0%}"
+                right_label += f" · Score {a['score']:.0%}"
             with col:
                 with st.container(key=f"nb2_tile_{a['key']}"):
-                    st.markdown(_card_html(a, right), unsafe_allow_html=True)
+                    st.markdown(_card_html(a, right_label), unsafe_allow_html=True)
                     st.checkbox(
                         "Feature this article",
                         key=base_key(a),
@@ -841,122 +905,153 @@ def render_tab(deps: Dict[str, Any]) -> None:
     if flyout_open:
         _render_flyout(base, sig)
 
-    if not base:
+
+def _generate_and_open(
+    deps: Dict[str, Any],
+    run: Dict[str, Any],
+    base: List[Dict[str, Any]],
+    supporting: List[Dict[str, Any]],
+    nl_title: str,
+    nl_note: str,
+) -> None:
+    """Write the newsletter, save it, and switch to the editing page."""
+    prompt = _build_prompt(base, supporting, nl_title, _run_label(run), nl_note)
+    with st.spinner("Writing newsletter…"):
+        try:
+            text = _generate(deps, prompt)
+        except Exception as e:
+            st.error(f"Generation failed: {e}")
+            return
+    if not text:
+        st.error("The model returned an empty newsletter. Please try again.")
+        return
+    sources = [
+        {
+            "role": "featured" if i < len(base) else "supporting",
+            "origin": a["origin"],
+            "title": a["title"],
+            "url": a["url"],
+            "source": a.get("source", ""),
+            "published_date": a.get("published_date", ""),
+            "reason": a.get("reason", ""),
+        }
+        for i, a in enumerate(base + supporting)
+    ]
+    sid = deps["save_newsletter"](
+        title=nl_title,
+        coverage_period=f"Seeded from Intelligence Briefing #{run['id']}",
+        content_md=text,
+        sources=sources,
+        config={
+            "workflow": "briefing_seeded_v2",
+            "briefing_run_id": run["id"],
+            "featured_refs": [b["ref"] for b in base],
+            "editorial_note": nl_note,
+        },
+    )
+    st.session_state[_k("flyout_open")] = False
+    preserve_state()
+    st.query_params.update({_VIEW_PARAM: _EDITOR_VIEW, "id": str(sid)})
+    st.rerun()
+
+
+# ============================================================
+# Editing page (?view=newsletter&id=N)
+# ============================================================
+
+_VIEW_PARAM = "view"
+_EDITOR_VIEW = "newsletter"
+# Buttons (and similar) can't have their state assigned, so preserve_state skips them
+_BUTTON_KEYS = ("_btn", "_flyout", "nb2_rm_", "nb2_ed_")
+
+
+def preserve_state() -> None:
+    """Keep this tab's selections while another page is shown.
+
+    Streamlit forgets the value of any widget that isn't drawn in a run; re-assigning
+    the values marks them as kept, so returning to the tab restores the briefing,
+    featured articles, search options, title and note.
+    """
+    for key in list(st.session_state.keys()):
+        if key.startswith(_SS) and not any(b in key for b in _BUTTON_KEYS):
+            try:
+                st.session_state[key] = st.session_state[key]
+            except Exception:
+                pass
+
+
+def editor_requested() -> bool:
+    return st.query_params.get(_VIEW_PARAM) == _EDITOR_VIEW
+
+
+def _back_to_tab() -> None:
+    st.query_params.clear()
+    st.session_state["return_to_nb2"] = True
+
+
+def render_editor_page(deps: Dict[str, Any]) -> None:
+    preserve_state()
+    st.button(
+        "← Back to Build Newsletter from Intel Briefing",
+        key=_k("ed_back"),
+        on_click=_back_to_tab,
+    )
+    try:
+        nid = int(st.query_params.get("id", ""))
+    except ValueError:
+        st.error("No newsletter selected.")
+        return
+    nl = deps["load_newsletter"](nid)
+    if not nl:
+        st.error(f"Newsletter #{nid} was not found.")
         return
 
-    # ── Supporting articles + build ────────────────────────────
-    supporting: List[Dict[str, Any]] = list(st.session_state[_k("supporting")].values())
-    st.markdown("---")
-    st.markdown(f"#### Supporting articles ({len(supporting)})")
-    if supporting:
-        for a in supporting:
-            s1, s2 = st.columns([0.9, 0.1], vertical_alignment="center")
-            with s1:
-                st.markdown(_article_header_md(a), unsafe_allow_html=True)
-            with s2:
-                if st.button("Remove", key=_k(f"rm_{a['key']}")):
-                    st.session_state[_k("supporting")].pop(a["key"], None)
-                    st.session_state.pop(_k(f"sup_cb_{a['key']}"), None)
-                    st.rerun()
-    else:
-        st.caption(
-            "None yet: use **Find similar articles** at the top and tick the ones to "
-            "include. You can also generate with the featured article(s) alone."
-        )
+    title = nl.get("title") or "Endometriosis Newsletter"
+    saved_text = nl.get("content_md") or ""
+    st.markdown(f"## ✏️ {title}")
+    st.caption(
+        f"Newsletter #{nid} · {nl.get('coverage_period') or ''} · last saved "
+        f"{(nl.get('updated_ts') or '')[:16].replace('T', ' ')} UTC · to send or "
+        "schedule it, open it in the Newsletter Builder tab."
+    )
 
-    st.markdown("#### Build the newsletter")
-    g1, g2, g3 = st.columns([1.2, 1.6, 0.9], vertical_alignment="bottom")
-    with g1:
-        nl_title = st.text_input(
-            "Newsletter title", value="Endometriosis Newsletter", key=_k("title")
-        )
-    with g2:
-        nl_note = st.text_input(
-            "Editorial note (optional)",
-            key=_k("note"),
-            placeholder="e.g. audience is clinicians; keep it under 600 words",
-        )
-    with g3:
-        gen = st.button(
-            "📰 Generate Newsletter",
+    ed_key = _k(f"ed_text_{nid}")
+    if ed_key not in st.session_state:
+        st.session_state[ed_key] = saved_text
+    edited = st.session_state[ed_key]
+
+    b1, b2, b3 = st.columns([1, 1, 3], vertical_alignment="center")
+    with b1:
+        if st.button(
+            "💾 Save changes",
             type="primary",
-            key=_k("gen_btn"),
+            key=_k(f"ed_save_{nid}"),
+            disabled=edited == saved_text,
+            use_container_width=True,
+        ):
+            deps["update_newsletter"](nid, edited)
+            st.toast(f"Newsletter #{nid} saved.")
+            st.rerun()
+    with b2:
+        st.download_button(
+            "⬇️ Download Markdown",
+            data=edited.encode("utf-8"),
+            file_name=f"newsletter_{nid}.md",
+            mime="text/markdown",
+            key=_k(f"ed_dl_{nid}"),
             use_container_width=True,
         )
+    with b3:
+        if edited != saved_text:
+            st.caption("Unsaved changes")
 
-    if gen:
-        prompt = _build_prompt(base, supporting, nl_title, _run_label(run), nl_note)
-        with st.spinner("Writing newsletter…"):
-            try:
-                text = _generate(deps, prompt)
-            except Exception as e:
-                st.error(f"Generation failed: {e}")
-                text = ""
-        if text:
-            sources = [
-                {
-                    "role": "featured" if i < len(base) else "supporting",
-                    "origin": a["origin"],
-                    "title": a["title"],
-                    "url": a["url"],
-                    "source": a.get("source", ""),
-                    "published_date": a.get("published_date", ""),
-                    "reason": a.get("reason", ""),
-                }
-                for i, a in enumerate(base + supporting)
-            ]
-            sid = deps["save_newsletter"](
-                title=nl_title,
-                coverage_period=f"Seeded from Intelligence Briefing #{run_id}",
-                content_md=text,
-                sources=sources,
-                config={
-                    "workflow": "briefing_seeded_v2",
-                    "briefing_run_id": run_id,
-                    "featured_refs": [b["ref"] for b in base],
-                    "editorial_note": nl_note,
-                },
-            )
-            st.session_state[_k("draft")] = text
-            st.session_state[_k("saved_id")] = sid
-            st.session_state[_k("editor")] = text
-            st.session_state[_k("flyout_open")] = False
-            st.rerun()
-
-    draft = st.session_state[_k("draft")]
-    if not draft:
-        return
-
-    sid = st.session_state[_k("saved_id")]
-    st.success(
-        f"Draft saved as Newsletter #{sid}. It also appears in the original Newsletter "
-        "Builder's saved list, where it can be sent or scheduled."
-    )
-    t_edit, t_prev = st.tabs(["✏️ Edit", "👁 Preview"])
-    with t_edit:
-        if _k("editor") not in st.session_state:
-            st.session_state[_k("editor")] = draft
-        edited = st.text_area("Newsletter Markdown", height=600, key=_k("editor"))
-        b1, b2 = st.columns([1, 1])
-        with b1:
-            if st.button(
-                "💾 Save changes", key=_k("save_btn"), disabled=edited == draft
-            ):
-                deps["update_newsletter"](sid, edited)
-                st.session_state[_k("draft")] = edited
-                st.rerun()
-        with b2:
-            st.download_button(
-                "⬇️ Download Markdown",
-                data=edited.encode("utf-8"),
-                file_name=f"newsletter_{sid}.md",
-                mime="text/markdown",
-                key=_k("dl_md"),
-            )
-    with t_prev:
+    e_col, p_col = st.columns(2, gap="medium")
+    with e_col:
+        st.text_area("Newsletter Markdown", height=760, key=ed_key)
+    with p_col:
         html = deps["render_newsletter_html"](
-            nl_title,
-            f"Endometriosis Newsletter · Seeded from Intelligence Briefing #{run_id}",
-            st.session_state[_k("draft")],
+            title,
+            f"Endometriosis Newsletter · {nl.get('coverage_period') or ''}",
+            st.session_state[ed_key],
         )
-        deps["html_component"](html, height=900, scrolling=True)
+        deps["html_component"](html, height=780, scrolling=True)

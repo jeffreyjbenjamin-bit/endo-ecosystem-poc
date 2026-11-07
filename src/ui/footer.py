@@ -6,7 +6,7 @@ Changelog link. The link switches the view inside the current session (no page
 reload, so the password isn't asked again) and sets ?view=changelog in the URL,
 which also opens the page directly.
 
-The version shown is the version in the first row of the CHANGELOG.md table.
+The version shown is the first version number (vX.Y.Z) in the CHANGELOG.md table.
 """
 
 from __future__ import annotations
@@ -53,11 +53,10 @@ _FOOTER_CSS = """
 
 def app_version() -> str:
     try:
-        m = re.search(
-            r"^\|\s*(\d+\.\d+\.\d+)\s*\|",
-            CHANGELOG_PATH.read_text(encoding="utf-8"),
-            re.M,
+        text = re.sub(
+            r"<!--.*?-->", "", CHANGELOG_PATH.read_text(encoding="utf-8"), flags=re.S
         )
+        m = re.search(r"\bv(\d+\.\d+\.\d+)\b", text)
         return m.group(1) if m else ""
     except OSError:
         return ""
@@ -105,8 +104,13 @@ def render_changelog_page() -> None:
         st.error("Changelog not found.")
         return
     st.markdown(
-        "<style>[data-testid='stMarkdownContainer'] table td:nth-child(-n+3)"
-        "{white-space:nowrap}</style>",
+        "<style>"
+        "[data-testid='stMarkdownContainer'] table { width:100%; }"
+        "[data-testid='stMarkdownContainer'] table td { vertical-align:top; }"
+        "[data-testid='stMarkdownContainer'] table td:first-child"
+        " { white-space:nowrap; font-weight:600; width:1%; padding-right:1.5rem; }"
+        "[data-testid='stMarkdownContainer'] table td ul { margin:0.2rem 0 0.8rem 0; }"
+        "</style>",
         unsafe_allow_html=True,
     )
-    st.markdown(re.sub(r"<!--.*?-->", "", text, flags=re.S))
+    st.markdown(re.sub(r"<!--.*?-->", "", text, flags=re.S), unsafe_allow_html=True)

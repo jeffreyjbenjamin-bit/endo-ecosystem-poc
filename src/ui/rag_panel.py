@@ -428,6 +428,21 @@ def load_newsletters(limit: int = 20) -> List[Dict[str, Any]]:
     return rows
 
 
+def load_newsletter(nid: int) -> Optional[Dict[str, Any]]:
+    if not Path(NEWSLETTER_DB).exists():
+        return None
+    conn = sqlite3.connect(NEWSLETTER_DB)
+    cur = conn.execute(
+        "SELECT id, created_ts, updated_ts, title, coverage_period, content_md "
+        "FROM newsletters WHERE id=?",
+        (nid,),
+    )
+    row = cur.fetchone()
+    cols = [d[0] for d in cur.description]
+    conn.close()
+    return dict(zip(cols, row)) if row else None
+
+
 # ── Mailing list persistence ──────────────────────────────────
 
 MAILING_LIST_DB = state_path("mailing_list.sqlite")
@@ -975,27 +990,69 @@ from src.ui.footer import (  # noqa: E402
     render_footer,
 )
 
+
+def _nb2_deps() -> Dict[str, Any]:
+    """Helpers the Build Newsletter from Intel Briefing tab and its editor page use."""
+    from src.pipelines.ai_search import (
+        load_recent_runs as _nb2_load_ai,
+        AI_SEARCH_DB as _NB2_AI_DB,
+        CHAT_DEPLOYMENT_5 as _NB2_DEPLOY,
+        make_chat_client as _nb2_make_client,
+    )
+
+    return {
+        "load_ai_runs": lambda limit: _nb2_load_ai(_NB2_AI_DB, limit=limit),
+        "load_docs_df": load_docs_df,
+        "load_sqlite_vectors": load_sqlite_vectors,
+        "embed_text": embed_text,
+        "cosine_search": cosine_search,
+        "make_chat_client": _nb2_make_client,
+        "chat_deployment": _NB2_DEPLOY,
+        "save_newsletter": save_newsletter,
+        "update_newsletter": update_newsletter,
+        "load_newsletter": load_newsletter,
+        "render_newsletter_html": render_newsletter_html,
+        "html_component": _st_components.html,
+    }
+
+
+from src.ui.newsletter_from_briefing import (  # noqa: E402
+    editor_requested,
+    preserve_state as _nb2_preserve_state,
+    render_editor_page,
+    render_tab as _nb2_render,
+)
+
 render_footer()
 if changelog_requested():
+    _nb2_preserve_state()
     render_changelog_page()
+    st.stop()
+
+if editor_requested():
+    render_editor_page(_nb2_deps())
     st.stop()
 
 st.title("Evidence Gap")
 
+TAB_BRIEFING = "🔍 Build Intelligence Briefing"
+TAB_NL_FROM_BRIEF = "🗞️ Build Newsletter from Intel Briefing"
 (
     tab_search,
+    tab_nl_v2,
     tab_rag,
     tab_newsletter,
     tab_nl_config,
-    tab_nl_v2,
 ) = st.tabs(
     [
-        "🔍 AI Article Search & Summary",
+        TAB_BRIEFING,
+        TAB_NL_FROM_BRIEF,
         "📚 RAG Article Presentation",
         "📰 Newsletter Builder",
         "📧 Report Config",
-        "🗞️ Build Newsletter from Intel Briefing",
-    ]
+    ],
+    # Returning from the newsletter editing page lands back on its tab
+    default=TAB_NL_FROM_BRIEF if st.session_state.pop("return_to_nb2", False) else None,
 )
 
 # Sidebar: model selector + disabled dataset updater + new chat
@@ -2413,7 +2470,7 @@ with tab_nl_config:
     if _nlc_src_choice == "Latest AI Search briefing":
         if not _nlc_ai_runs:
             st.warning(
-                "No AI Search briefings found. Run a search on the AI Article Search & Summary tab first."
+                "No AI Search briefings found. Run a search on the Build Intelligence Briefing tab first."
             )
         else:
             _nlc_run_opts = {
@@ -2787,7 +2844,7 @@ with tab_nl_config:
 
 
 # ============================================================
-# Tab 2: AI Article Search & Summary
+# Tab: Build Intelligence Briefing (AI Article Search & Summary)
 # ============================================================
 with tab_search:
 
@@ -3722,28 +3779,6 @@ with tab_rag:
 # ============================================================
 with tab_nl_v2:
     try:
-        from src.pipelines.ai_search import (
-            load_recent_runs as _nb2_load_ai,
-            AI_SEARCH_DB as _NB2_AI_DB,
-            CHAT_DEPLOYMENT_5 as _NB2_DEPLOY,
-            make_chat_client as _nb2_make_client,
-        )
-        from src.ui.newsletter_from_briefing import render_tab as _nb2_render
-
-        _nb2_render(
-            {
-                "load_ai_runs": lambda limit: _nb2_load_ai(_NB2_AI_DB, limit=limit),
-                "load_docs_df": load_docs_df,
-                "load_sqlite_vectors": load_sqlite_vectors,
-                "embed_text": embed_text,
-                "cosine_search": cosine_search,
-                "make_chat_client": _nb2_make_client,
-                "chat_deployment": _NB2_DEPLOY,
-                "save_newsletter": save_newsletter,
-                "update_newsletter": update_newsletter,
-                "render_newsletter_html": render_newsletter_html,
-                "html_component": _st_components.html,
-            }
-        )
+        _nb2_render(_nb2_deps())
     except Exception as _nb2_err:
         st.error(f"Build Newsletter from Intel Briefing failed to load: {_nb2_err}")
