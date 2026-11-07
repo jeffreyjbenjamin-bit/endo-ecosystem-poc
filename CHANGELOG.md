@@ -14,6 +14,13 @@ footer. Keep each version's changes in its own <ul> list. -->
 
 <tr><td>2026-11-07</td><td>
 
+<b>v1.9.0</b>
+<ul>
+<li>Build Intelligence Briefing now searches company press releases: a new <b>Industry &amp; Press Releases</b> focus area (Business Wire, PR Newswire, GlobeNewswire, and Phase 1–3 / diagnostics announcements), included automatically when no focus area is chosen. All existing searches are unchanged.</li>
+<li>Press releases are tagged, shown with a <b>Press Release</b> badge, and up to three on-topic ones are kept among the sources each briefing is written from.</li>
+<li>New <b>Industry &amp; Company News</b> briefing section: company, product, modality, development stage and the news, attributed to the company.</li>
+</ul>
+
 <b>v1.8.0</b>
 <ul>
 <li>RAG Article Presentation and the original Newsletter Builder tabs hidden.</li>

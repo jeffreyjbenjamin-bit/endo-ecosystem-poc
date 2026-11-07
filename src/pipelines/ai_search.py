@@ -85,7 +85,34 @@ _MEDIUM_CREDIBILITY: set = {
     "springer.com",
     "wiley.com",
     "oxford.com",
+    # Press-release wires and biotech trade press (company-reported news)
+    "businesswire.com",
+    "prnewswire.com",
+    "globenewswire.com",
+    "accessnewswire.com",
+    "newswire.ca",
+    "biospace.com",
+    "fiercebiotech.com",
+    "fiercehealthcare.com",
+    "medtechdive.com",
+    "massdevice.com",
 }
+
+# Hosts whose pages are company press releases
+_PRESS_RELEASE_HOSTS: set = {
+    "businesswire.com",
+    "prnewswire.com",
+    "globenewswire.com",
+    "accessnewswire.com",
+    "accesswire.com",
+    "newswire.ca",
+    "einpresswire.com",
+    "newswire.com",
+    "prweb.com",
+}
+_PRESS_RELEASE_PATTERN = re.compile(
+    r"press[-_ ]releases?|news[-_ ]releases?|/investors?/news|/media/news", re.I
+)
 _IMPORTANCE_TERMS = [
     "fda approval",
     "fda approved",
@@ -94,6 +121,14 @@ _IMPORTANCE_TERMS = [
     "phase iii",
     "phase 2",
     "phase ii",
+    "phase 1",
+    "phase i ",
+    "topline",
+    "first patient dosed",
+    "ind clearance",
+    "510(k)",
+    "breakthrough device",
+    "ce mark",
     "clinical trial",
     "randomized controlled",
     "rct",
@@ -164,7 +199,20 @@ _CATEGORY_TEMPLATES: Dict[str, List[str]] = {
         "{topic} quality of life patient outcomes {year}",
         "{topic} pain management fertility {year}",
     ],
+    # Company press releases from diagnostics and therapeutics companies with
+    # Phase 1–3 programs (wire services plus announcement-style queries)
+    "Industry & Press Releases": [
+        "{topic} clinical trial press release site:businesswire.com",
+        "{topic} clinical trial press release site:prnewswire.com",
+        "{topic} clinical trial press release site:globenewswire.com",
+        "{topic} biotech announces phase 1 OR phase 2 OR phase 3 {year}",
+        "{topic} company announces topline results candidate {year}",
+        "{topic} diagnostic test company announces press release {year}",
+    ],
 }
+
+# Ordered list for the UI's focus-area picker
+SEARCH_CATEGORIES: List[str] = list(_CATEGORY_TEMPLATES.keys())
 
 _BASE_TEMPLATES = [
     "{topic} latest news {year}",
@@ -332,13 +380,72 @@ def _score_importance(r: Dict[str, Any]) -> float:
     return min(1.0, hits / 3)
 
 
+def is_press_release(r: Dict[str, Any]) -> bool:
+    """Company press release: from a wire service, or a page labelled as one.
+
+    Journals, government agencies and medical societies (the high-credibility list)
+    also publish "press releases", but they aren't company news and already rank
+    well, so they are not counted.
+    """
+    host = (r.get("source_name") or "").lower()
+    if any(host == h or host.endswith("." + h) for h in _PRESS_RELEASE_HOSTS):
+        return True
+    if any(host == h or host.endswith("." + h) for h in _HIGH_CREDIBILITY):
+        return False
+    text = " ".join(str(r.get(k) or "") for k in ("url", "title", "snippet"))
+    return bool(_PRESS_RELEASE_PATTERN.search(text))
+
+
+# How many sources the briefing is written from, and how many of those slots
+# relevant press releases may claim if they would otherwise be ranked out.
+BRIEFING_SOURCES = 15
+MIN_PRESS_RELEASES = 3
+
+
+def _promote_press_releases(
+    ranked: List[Dict[str, Any]],
+    topic: str,
+    top_n: int = BRIEFING_SOURCES,
+    min_n: int = MIN_PRESS_RELEASES,
+) -> List[Dict[str, Any]]:
+    """Make sure up to `min_n` on-topic press releases are within the top `top_n`.
+
+    Press releases are company-issued, so they score lower on credibility than
+    journals and would rarely make the cut on score alone. Displaced results move
+    just below the cut, keeping their relative order.
+    """
+    stem = topic.lower()[:8]  # "endometr" matches endometriosis/endometrioma
+    on_topic = lambda r: stem in (r["title"] + " " + r["snippet"]).lower()  # noqa: E731
+    top, rest = ranked[:top_n], ranked[top_n:]
+    have = sum(1 for r in top if r.get("is_press_release"))
+    wanted = [r for r in rest if r.get("is_press_release") and on_topic(r)]
+    wanted = wanted[: max(0, min_n - have)]
+    if not wanted:
+        return ranked
+    displaced: List[Dict[str, Any]] = []
+    for _ in wanted:
+        for i in range(len(top) - 1, -1, -1):
+            if not top[i].get("is_press_release"):
+                displaced.insert(0, top.pop(i))
+                break
+    top += wanted
+    top.sort(key=lambda x: x["composite_score"], reverse=True)
+    rest = [r for r in rest if r not in wanted]
+    return top + displaced + rest
+
+
 def score_results(
     results: List[Dict[str, Any]],
     topic: str,
     date_range_days: int,
 ) -> List[Dict[str, Any]]:
-    """Add per-dimension scores + composite, return sorted descending."""
+    """Add per-dimension scores + composite, return sorted descending.
+
+    Press releases are tagged (is_press_release) and a few on-topic ones are kept
+    among the top BRIEFING_SOURCES so company news reaches the briefing.
+    """
     for r in results:
+        r["is_press_release"] = is_press_release(r)
         r["score_recency"] = _score_recency(r.get("published_date"), date_range_days)
         r["score_credibility"] = _score_credibility(r.get("source_name", ""))
         r["score_relevance"] = _score_relevance(r, topic)
@@ -349,7 +456,8 @@ def score_results(
             + 0.25 * r["score_relevance"]
             + 0.15 * r["score_importance"]
         )
-    return sorted(results, key=lambda x: x["composite_score"], reverse=True)
+    ranked = sorted(results, key=lambda x: x["composite_score"], reverse=True)
+    return _promote_press_releases(ranked, topic)
 
 
 # ============================================================
@@ -383,6 +491,9 @@ Summarize advances in biomarkers, imaging, and non-invasive or early-detection m
 
 ## Therapeutics
 Summarize novel therapeutic approaches, targets, or treatment outcomes visible in the sources. Include hormonal, non-hormonal, immunological, and surgical modalities. Note stage of evidence (preclinical, Phase I/II/III, approved). Cite inline with [N]. If no therapeutic developments are present, say so explicitly.
+
+## Industry & Company News
+Summarize company press releases (sources marked "Type: Company press release") from diagnostics and therapeutics companies about endometriosis programs. For each, name the company, the product or candidate, its modality (diagnostic test, drug, device), its development stage (Phase 1, Phase 2, Phase 3, or regulatory status such as filing, clearance or approval), and the news (trial start, enrollment, topline results, partnership, financing, regulatory step). Attribute claims to the company (e.g. "Company X reported…"), since press releases are not peer reviewed. Cite inline with [N]. If no press releases are present, say so explicitly.
 
 ## Epidemiology
 Summarize findings on prevalence, incidence, diagnosis delay, risk factors, comorbidities, or healthcare burden visible in the sources. Highlight any population-level or demographic patterns. Cite inline with [N]. If no epidemiological findings are present, say so explicitly.
@@ -434,7 +545,7 @@ def synthesize_briefing(
     topic: str,
     date_range_days: int,
     deployment: str,
-    max_sources: int = 15,
+    max_sources: int = BRIEFING_SOURCES,
 ) -> Tuple[str, Dict[str, Any]]:
     """
     Pass top-scored sources to GPT for synthesis.
@@ -456,6 +567,8 @@ def synthesize_briefing(
         parts.append(f"    Date: {date}")
         if url:
             parts.append(f"    URL: {url}")
+        if r.get("is_press_release"):
+            parts.append("    Type: Company press release (company-reported)")
         if snippet:
             parts.append(f"    Excerpt: {snippet[:400]}")
         return "\n".join(parts)

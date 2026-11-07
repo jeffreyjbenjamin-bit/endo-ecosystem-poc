@@ -119,6 +119,7 @@ def _md_inline(text: str) -> str:
 # Sections whose paragraph blocks get card treatment (same as Key Developments)
 _CARD_SECTIONS = {
     "Key Developments",
+    "Industry & Company News",
     "Diagnostics",
     "Therapeutics",
     "Epidemiology",

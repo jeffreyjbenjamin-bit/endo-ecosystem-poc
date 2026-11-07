@@ -160,6 +160,7 @@ def _briefing_articles(run: Dict[str, Any]) -> List[Dict[str, Any]]:
                 "snippet": (s.get("snippet") or "").strip(),
                 "score": s.get("composite_score"),
                 "cited": i in cited,
+                "is_press_release": bool(s.get("is_press_release")),
             }
         )
     return out
@@ -510,7 +511,11 @@ def _esc(s: str) -> str:
 
 
 def _card_html(a: Dict[str, Any], right_label: str, extra_html: str = "") -> str:
-    label, cls = _badge(a.get("source", ""))
+    label, cls = (
+        ("Press Release", "badge-press")
+        if a.get("is_press_release")
+        else _badge(a.get("source", ""))
+    )
     url = _esc(a.get("url", ""))
     title = _esc(a["title"])
     title_html = (

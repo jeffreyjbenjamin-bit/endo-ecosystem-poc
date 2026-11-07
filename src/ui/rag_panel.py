@@ -173,6 +173,7 @@ st.markdown(
         .badge-biorxiv          { background:#fef9e7; color:#9a7d0a; }
         .badge-medrxiv          { background:#fef5e7; color:#b7770d; }
         .badge-default          { background:#f2f3f4; color:#444; }
+        .badge-press            { background:#fde8f1; color:#9b1d5a; }
 
         .endo-title { font-size:1.08rem; font-weight:700; color:#0d2137;
                       line-height:1.4; margin:6px 0 4px 0; }
@@ -2904,6 +2905,7 @@ with tab_search:
             CHAT_DEPLOYMENT_5 as _AI_DEPLOY_5,
             CHAT_DEPLOYMENT_4O as _AI_DEPLOY_4O,
             AI_SEARCH_DB,
+            SEARCH_CATEGORIES,
         )
         from src.connectors.search_provider import (
             get_provider,
@@ -2958,7 +2960,11 @@ with tab_search:
         def _render_search_card(r: Dict[str, Any]) -> str:
             """Render a scored search result dict as an .endo-card."""
             source_name = r.get("source_name", "")
-            label, badge_cls = _search_badge(source_name)
+            label, badge_cls = (
+                ("Press Release", "badge-press")
+                if r.get("is_press_release")
+                else _search_badge(source_name)
+            )
 
             title = str(r.get("title") or "Untitled").strip()
             url = str(r.get("url") or "").strip()
@@ -3018,19 +3024,7 @@ with tab_search:
                     key="ai_date_range",
                 )
             with _s_col2:
-                _all_cats = list(
-                    {
-                        "Clinical Trials",
-                        "Treatments & Drug Pipeline",
-                        "Diagnostics",
-                        "Therapeutics",
-                        "Epidemiology",
-                        "Basic Research",
-                        "Regulatory & Policy",
-                        "Surgery",
-                        "Patient Outcomes",
-                    }
-                )
+                _all_cats = list(SEARCH_CATEGORIES)
                 _categories = st.multiselect(
                     "Focus areas (all if empty)",
                     _all_cats,
