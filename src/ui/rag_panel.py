@@ -968,6 +968,18 @@ def chat_answer(
 # ============================================================
 # Layout: title, tabs, sidebar
 # ============================================================
+# Persistent footer on every page; Changelog view replaces the tabs when selected
+from src.ui.footer import (  # noqa: E402
+    changelog_requested,
+    render_changelog_page,
+    render_footer,
+)
+
+render_footer()
+if changelog_requested():
+    render_changelog_page()
+    st.stop()
+
 st.title("Evidence Gap")
 
 (
