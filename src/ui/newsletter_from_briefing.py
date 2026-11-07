@@ -784,7 +784,8 @@ def render_tab(deps: Dict[str, Any]) -> None:
 
     articles = _briefing_articles(run)
     base_key = lambda a: _k(f"base_{a['key']}")  # noqa: E731
-    base = [a for a in articles if st.session_state.get(base_key(a))]
+    trial_arts = _newsletter_trial_articles()
+    base = [a for a in articles + trial_arts if st.session_state.get(base_key(a))]
     n_base = len(base)
 
     with top4:
@@ -825,7 +826,11 @@ def render_tab(deps: Dict[str, Any]) -> None:
             disabled=n_base == 0,
             use_container_width=True,
             key=_k("search_btn"),
-            help="Select 1–2 articles below first" if n_base == 0 else None,
+            help=(
+                "Feature 1–2 articles below, or a clinical trial"
+                if n_base == 0
+                else None
+            ),
         )
     with top3:
         n_res = len(st.session_state[_k("results")])
@@ -865,7 +870,8 @@ def render_tab(deps: Dict[str, Any]) -> None:
         if not base:
             st.markdown(
                 "**📰 Build a newsletter** — feature 1–2 articles from the briefing "
-                "below, then use **Find similar articles** to pick supporting ones."
+                "below (or a clinical trial), then use **Find similar articles** to "
+                "pick supporting ones."
             )
         else:
             left, right = st.columns([1.35, 1], gap="large")
@@ -912,7 +918,7 @@ def render_tab(deps: Dict[str, Any]) -> None:
             if gen:
                 _generate_and_open(deps, run, base, supporting, nl_title, nl_note)
 
-    _render_newsletter_trials()
+    _render_newsletter_trials(trial_arts, base_key, n_base)
 
     # ── Article tiles ──────────────────────────────────────────
     c1, c2, c3 = st.columns([2.2, 1.6, 1], vertical_alignment="center")
@@ -956,48 +962,70 @@ def render_tab(deps: Dict[str, Any]) -> None:
 
 
 def _trial_article(t: Dict[str, Any]) -> Dict[str, Any]:
-    """A clinical trial in the shape of a supporting article."""
+    """A clinical trial in the shape of a briefing article (featured or supporting)."""
     from src.pipelines.clinical_trials import trial_snippet
 
     return {
         "key": f"trial_{t['id']}",
+        "ref": t["id"],
         "origin": "clinical_trial",
         "title": f"{t['title']} ({t['id']})",
         "url": t["url"],
         "source": t.get("source") or "ClinicalTrials.gov",
         "published_date": t.get("first_posted") or t.get("last_update") or "",
         "snippet": trial_snippet(t),
+        "cited": False,
+        "trial": t,
     }
 
 
-def _render_newsletter_trials() -> None:
-    """Trials ticked 'Newsletter' on the Clinical Trials tab, ready to add."""
+def _newsletter_trial_articles() -> List[Dict[str, Any]]:
+    """Trials ticked 'Newsletter' on the Clinical Trials tab, as articles."""
     try:
         from src.pipelines.clinical_trials import newsletter_trials
 
-        trials = newsletter_trials()
+        return [_trial_article(t) for t in newsletter_trials()]
     except Exception:
-        trials = []
+        return []
+
+
+def _on_feature_trial(a: Dict[str, Any], feat_key: str) -> None:
+    # A featured trial is the subject of the newsletter, not a supporting item.
+    if st.session_state.get(feat_key):
+        st.session_state[_k("supporting")].pop(a["key"], None)
+
+
+def _render_newsletter_trials(
+    trial_arts: List[Dict[str, Any]], base_key, n_base: int
+) -> None:
+    """Marked trials: feature one (and find similar articles) or add as supporting."""
     sup = st.session_state[_k("supporting")]
-    n_added = sum(1 for t in trials if f"trial_{t['id']}" in sup)
-    label = f"🧪 Clinical trials marked for the newsletter ({len(trials)})"
+    n_added = sum(1 for a in trial_arts if a["key"] in sup)
+    n_feat = sum(1 for a in trial_arts if st.session_state.get(base_key(a)))
+    label = f"🧪 Clinical trials marked for the newsletter ({len(trial_arts)})"
+    if n_feat:
+        label += f" · {n_feat} featured"
     if n_added:
         label += f" · {n_added} added"
-    with st.expander(label, expanded=bool(trials) and not n_added):
-        if not trials:
+    with st.expander(label, expanded=bool(trial_arts) and (n_feat > 0 or not n_added)):
+        if not trial_arts:
             st.caption(
                 "None yet. Tick **Newsletter** next to a study on the Clinical "
                 "Trials tab to make it available here."
             )
             return
         st.caption(
-            "Tick a trial to include it with the selected articles as a supporting item."
+            "**Feature** a trial to build the newsletter around it and use **Find "
+            "similar articles**, or **Include** it as a supporting item with the "
+            "selected articles."
         )
         n_cols = 3
-        for row_start in range(0, len(trials), n_cols):
+        for row_start in range(0, len(trial_arts), n_cols):
             cols = st.columns(n_cols, gap="small")
-            for col, t in zip(cols, trials[row_start : row_start + n_cols]):
-                a = _trial_article(t)
+            for col, a in zip(cols, trial_arts[row_start : row_start + n_cols]):
+                t = a["trial"]
+                feat_key = base_key(a)
+                featured = bool(st.session_state.get(feat_key))
                 cb_key = _k(f"sup_cb_{a['key']}")
                 st.session_state[cb_key] = a["key"] in sup
                 right = " · ".join(
@@ -1015,9 +1043,18 @@ def _render_newsletter_trials() -> None:
                             ),
                             unsafe_allow_html=True,
                         )
-                        st.checkbox(
-                            "Include in newsletter",
+                        c1, c2 = st.columns(2)
+                        c1.checkbox(
+                            "Feature this trial",
+                            key=feat_key,
+                            disabled=(not featured and n_base >= MAX_BASE_ARTICLES),
+                            on_change=_on_feature_trial,
+                            args=(a, feat_key),
+                        )
+                        c2.checkbox(
+                            "Include as supporting",
                             key=cb_key,
+                            disabled=featured,
                             on_change=_on_toggle_supporting,
                             args=(a, cb_key),
                         )

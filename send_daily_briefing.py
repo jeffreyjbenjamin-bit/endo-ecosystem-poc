@@ -263,6 +263,28 @@ def _mark_trials_briefed(briefing_text: str) -> None:
         print(f"  Could not record emailed clinical trials: {exc}")
 
 
+def _prepare_home_page() -> None:
+    """Refresh the Home page's AI trend analysis and article preview images."""
+    try:
+        from src.pipelines.trends import generate_trends
+
+        data = generate_trends()
+        print(f"  Trend analysis updated ({data['counts']}).")
+    except Exception as exc:
+        print(f"  Trend analysis failed: {exc}")
+    try:
+        from src.common.page_images import images_for
+
+        runs = _load_latest_ai_runs(limit=1)
+        sources = json.loads(runs[0].get("sources_json") or "[]") if runs else []
+        found = images_for(s.get("url", "") for s in sources if not s.get("image"))
+        print(
+            f"  Preview images: {sum(1 for v in found.values() if v)} of {len(found)}."
+        )
+    except Exception as exc:
+        print(f"  Preview images failed: {exc}")
+
+
 def _run_ai_search() -> bool:
     """Run the AI Article Search pipeline and save the result. Returns True on success."""
     print("Running AI Search pipeline…")
@@ -356,6 +378,7 @@ def main(force: bool = False, auto_search: bool = False) -> None:
     # Optionally run AI search to get fresh content
     if auto_search:
         _run_ai_search()
+        _prepare_home_page()
 
     today = _now().strftime("%B %d, %Y")
     sent_utc = datetime.now(timezone.utc).strftime("%B %d, %Y %H:%M UTC")

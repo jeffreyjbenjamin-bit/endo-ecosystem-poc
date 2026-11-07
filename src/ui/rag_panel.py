@@ -1041,6 +1041,40 @@ if editor_requested():
     render_editor_page(_nb2_deps())
     st.stop()
 
+
+def _past_run_result(pr: Dict[str, Any]) -> Dict[str, Any]:
+    """A saved Intelligence Briefing run in the shape the briefing tab displays."""
+
+    def _json_list(v: Any) -> list:
+        try:
+            out = json.loads(v or "[]")
+            return out if isinstance(out, list) else []
+        except (TypeError, ValueError):
+            return []
+
+    scored = _json_list(pr.get("sources_json"))
+    return {
+        "run_id": pr["id"],
+        "briefing": pr.get("briefing_text") or "",
+        "scored": scored,
+        "n_raw": pr.get("n_raw") or 0,
+        "n_deduped": pr.get("n_scored") or len(scored),
+        "n_queries": pr.get("n_queries") or 0,
+        "provider": pr.get("provider") or "",
+        "model": pr.get("model_used") or "",
+        "latency_ms": pr.get("latency_ms") or 0,
+        "date_range": pr.get("date_range_days"),
+        # load_recent_runs() does not select categories; missing = all areas
+        "categories": _json_list(pr.get("categories")),
+        "errors": [],
+        "ts": (pr.get("run_ts") or "")[:16].replace("T", " ") + " UTC",
+    }
+
+
+def _show_past_run(pr: Dict[str, Any]) -> None:
+    st.session_state["ai_search_result"] = _past_run_result(pr)
+
+
 # Report Config opens from the ⚙️ button in the top banner (?view=config) instead of
 # a tab. The page layout is the same in both views and CSS hides one or the other,
 # so the tabs keep their selections and active tab while Report Config is open.
@@ -1090,7 +1124,8 @@ SHOW_LEGACY_TABS = os.getenv("SHOW_LEGACY_TABS", "0").strip().lower() in (
     "true",
     "yes",
 )
-_tab_labels = [TAB_BRIEFING, TAB_NL_FROM_BRIEF]
+TAB_HOME = "🏠 Home"
+_tab_labels = [TAB_HOME, TAB_BRIEFING, TAB_NL_FROM_BRIEF]
 if SHOW_LEGACY_TABS:
     _tab_labels += ["📚 RAG Article Presentation", "📰 Newsletter Builder"]
 TAB_TRIALS = "🧪 Clinical Trials"
@@ -1104,9 +1139,9 @@ with st.container(key="main_tabs"):
         ),
     )
 tab_nl_config = st.container(key="report_config")
-tab_search, tab_nl_v2 = _tabs[0], _tabs[1]
+tab_home, tab_search, tab_nl_v2 = _tabs[0], _tabs[1], _tabs[2]
 tab_trials = _tabs[-1]
-tab_rag, tab_newsletter = (_tabs[2], _tabs[3]) if SHOW_LEGACY_TABS else (None, None)
+tab_rag, tab_newsletter = (_tabs[3], _tabs[4]) if SHOW_LEGACY_TABS else (None, None)
 
 # Sidebar: model selector + disabled dataset updater + new chat
 st.markdown(
@@ -2315,6 +2350,28 @@ For each finding, write a standalone paragraph block — no bullet dashes. Follo
 
 
 # ============================================================
+# Tab: Home (summary of everything else)
+# ============================================================
+with tab_home:
+    from src.pipelines.ai_search import AI_SEARCH_DB as _home_db
+    from src.pipelines.ai_search import load_recent_runs as _home_runs
+    from src.ui.home_tab import render_tab as _home_render
+    from src.ui.newsletter_from_briefing import _open_newsletter as _home_open_nl
+
+    try:
+        _home_render(
+            {
+                "load_runs": lambda n: _home_runs(_home_db, limit=n),
+                "sources_of": lambda r: _past_run_result(r)["scored"],
+                "load_newsletters": load_newsletters,
+                "open_newsletter": _home_open_nl,
+            }
+        )
+    except Exception as _home_exc:
+        st.error(f"Home could not be loaded: {_home_exc}")
+
+
+# ============================================================
 # Tab: Clinical Trials
 # ============================================================
 with tab_trials:
@@ -2349,18 +2406,13 @@ with tab_nl_config:
 
     # ── SMTP status banner ────────────────────────────────────
     _nlc_smtp = load_smtp_config()
+    # Only a problem is shown; a working email setup needs no banner.
     if _nlc_smtp is None:
         st.warning(
             "SMTP is not configured — emails cannot be sent. "
             "Add `EMAIL_SMTP_HOST`, `EMAIL_FROM`, and `EMAIL_PASSWORD` to your `.env` file."
         )
-    else:
-        st.success(
-            f"SMTP ready · sending from **{_nlc_smtp.from_addr}** via "
-            f"`{_nlc_smtp.host}:{_nlc_smtp.port}`"
-        )
-
-    st.markdown("---")
+        st.markdown("---")
 
     # ── Daily send schedule ───────────────────────────────────
     st.markdown("#### Daily Send Schedule")
@@ -3309,6 +3361,12 @@ with tab_search:
                 st.error(f"**Unexpected error during search run:**  \n`{_exc}`")
 
         # ── Two-column layout: source cards left, briefing panel right ──
+        # First visit: show the most recent saved briefing.
+        if "ai_search_result" not in st.session_state:
+            _latest = load_recent_runs(AI_SEARCH_DB, limit=1)
+            st.session_state["ai_search_result"] = (
+                _past_run_result(_latest[0]) if _latest else None
+            )
         _result = st.session_state.get("ai_search_result")
         _main_col, _brief_col = st.columns([1.55, 1], gap="large")
 
@@ -3414,29 +3472,22 @@ with tab_search:
                             )
                             st.caption(
                                 f"{_pr['n_scored']} sources &nbsp;·&nbsp; "
-                                f"{_pr['model_used']} &nbsp;·&nbsp; {_pr['latency_ms']:,} ms"
+                                f"{_pr['model_used']} &nbsp;·&nbsp; {(_pr['latency_ms'] or 0):,} ms"
                             )
                         with _pr_cols[1]:
                             st.caption(f"Window: {_pr['date_range_days']} days")
                         with _pr_cols[2]:
-                            if st.button("View", key=f"pr_{_pr['id']}"):
-                                _pr_sources = json.loads(_pr["sources_json"] or "[]")
-                                st.session_state["ai_search_result"] = {
-                                    "run_id": _pr["id"],
-                                    "briefing": _pr["briefing_text"],
-                                    "scored": _pr_sources,
-                                    "n_raw": _pr["n_raw"],
-                                    "n_deduped": _pr["n_scored"],
-                                    "n_queries": _pr["n_queries"],
-                                    "provider": _pr["provider"],
-                                    "model": _pr["model_used"],
-                                    "latency_ms": _pr["latency_ms"],
-                                    "date_range": _pr["date_range_days"],
-                                    "categories": json.loads(_pr["categories"] or "[]"),
-                                    "errors": [],
-                                    "ts": _pr["run_ts"][:16].replace("T", " ") + " UTC",
-                                }
-                                st.rerun()
+                            st.button(
+                                "View",
+                                key=f"pr_{_pr['id']}",
+                                type=(
+                                    "primary"
+                                    if _result and _result.get("run_id") == _pr["id"]
+                                    else "secondary"
+                                ),
+                                on_click=_show_past_run,
+                                args=(_pr,),
+                            )
 
 # ============================================================
 # Tab 3: RAG Article Presentation

@@ -28,6 +28,7 @@ from dotenv import load_dotenv
 from openai import AzureOpenAI
 
 from src.connectors.search_provider import SearchProvider, SearchResult
+from src.common.page_images import image_from_search_item
 from src.common.paths import state_path
 
 load_dotenv()
@@ -306,6 +307,7 @@ def normalize_results(raw: List[SearchResult]) -> List[Dict[str, Any]]:
             "snippet": (r.snippet or "").strip(),
             "source_name": (r.source_name or "").strip(),
             "published_date": r.published_date,
+            "image": image_from_search_item(r.raw or {}) or "",
         }
         for r in raw
         if r.url and r.title

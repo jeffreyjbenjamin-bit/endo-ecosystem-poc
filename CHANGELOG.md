@@ -14,6 +14,16 @@ footer. Keep each version's changes in its own <ul> list. -->
 
 <tr><td>2026-11-07</td><td>
 
+<b>v1.12.0</b>
+<ul>
+<li>New <b>Home</b> tab (first tab), a summary of the whole app: the latest briefing's Intelligence Summary and Key Developments, an at-a-glance panel (latest briefing, open trials, latest newsletter with an Open button), recent search results as cards with preview images, and the 5 most recently posted clinical trials.</li>
+<li><b>AI trend analysis</b> on Home: top trends of the past week, month and year from briefing results, the evidence library and clinical trials. Updated after each daily briefing, or on demand with Refresh analysis.</li>
+<li>Build Intelligence Briefing opens on the most recent briefing.</li>
+<li>Fixed <b>View</b> in Past Runs, which failed to load earlier briefings.</li>
+<li>On Build Newsletter from Intel Briefing, a clinical trial can be <b>featured</b> like an article, so <b>Find similar articles</b> works from a selected trial.</li>
+<li>"SMTP ready" banner removed from Report Config (a warning still shows if email is not set up).</li>
+</ul>
+
 <b>v1.11.0</b>
 <ul>
 <li>Report Config moved from a tab to a <b>⚙️</b> button in the upper right of the top banner; <b>← Back</b> returns to the tab you were on, with your selections kept.</li>
