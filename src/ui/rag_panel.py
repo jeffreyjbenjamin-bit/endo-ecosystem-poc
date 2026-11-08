@@ -434,8 +434,8 @@ def load_newsletter(nid: int) -> Optional[Dict[str, Any]]:
         return None
     conn = sqlite3.connect(NEWSLETTER_DB)
     cur = conn.execute(
-        "SELECT id, created_ts, updated_ts, title, coverage_period, content_md "
-        "FROM newsletters WHERE id=?",
+        "SELECT id, created_ts, updated_ts, title, coverage_period, content_md, "
+        "sources_json, config_json FROM newsletters WHERE id=?",
         (nid,),
     )
     row = cur.fetchone()
@@ -1075,9 +1075,9 @@ def _show_past_run(pr: Dict[str, Any]) -> None:
     st.session_state["ai_search_result"] = _past_run_result(pr)
 
 
-# Report Config opens from the ⚙️ button in the top banner (?view=config) instead of
+# Settings opens from the ⚙️ button in the top banner (?view=config) instead of
 # a tab. The page layout is the same in both views and CSS hides one or the other,
-# so the tabs keep their selections and active tab while Report Config is open.
+# so the tabs keep their selections and active tab while Settings is open.
 _CONFIG_VIEW = st.query_params.get("view") == "config"
 
 
@@ -1100,7 +1100,7 @@ with st.container(
         st.button(
             "⚙️",
             key="config_open",
-            help="Report Config: mailing list, daily send time and email settings",
+            help="Settings: users, mailing list, daily send time and email settings",
             on_click=_open_config,
         )
 st.markdown(
@@ -1125,11 +1125,11 @@ SHOW_LEGACY_TABS = os.getenv("SHOW_LEGACY_TABS", "0").strip().lower() in (
     "yes",
 )
 TAB_HOME = "🏠 Home"
-_tab_labels = [TAB_HOME, TAB_BRIEFING, TAB_NL_FROM_BRIEF]
+TAB_TRIALS = "🧪 Clinical Trials"
+# Order: Home, Build Intelligence Briefing, Clinical Trials, Build Newsletter
+_tab_labels = [TAB_HOME, TAB_BRIEFING, TAB_TRIALS, TAB_NL_FROM_BRIEF]
 if SHOW_LEGACY_TABS:
     _tab_labels += ["📚 RAG Article Presentation", "📰 Newsletter Builder"]
-TAB_TRIALS = "🧪 Clinical Trials"
-_tab_labels.append(TAB_TRIALS)
 with st.container(key="main_tabs"):
     _tabs = st.tabs(
         _tab_labels,
@@ -1139,9 +1139,19 @@ with st.container(key="main_tabs"):
         ),
     )
 tab_nl_config = st.container(key="report_config")
-tab_home, tab_search, tab_nl_v2 = _tabs[0], _tabs[1], _tabs[2]
-tab_trials = _tabs[-1]
-tab_rag, tab_newsletter = (_tabs[3], _tabs[4]) if SHOW_LEGACY_TABS else (None, None)
+_tab_by_label = dict(zip(_tab_labels, _tabs))
+tab_home = _tab_by_label[TAB_HOME]
+tab_search = _tab_by_label[TAB_BRIEFING]
+tab_trials = _tab_by_label[TAB_TRIALS]
+tab_nl_v2 = _tab_by_label[TAB_NL_FROM_BRIEF]
+tab_rag, tab_newsletter = (
+    (
+        _tab_by_label["📚 RAG Article Presentation"],
+        _tab_by_label["📰 Newsletter Builder"],
+    )
+    if SHOW_LEGACY_TABS
+    else (None, None)
+)
 
 # Sidebar: model selector + disabled dataset updater + new chat
 st.markdown(
@@ -1743,7 +1753,7 @@ Return only the JSON array, no other text."""
                         st.error("SMTP not configured.")
                     elif not _nl_recips_nl:
                         st.warning(
-                            "No recipients subscribed to Newsletter. Update subscriptions in Report Config."
+                            "No recipients subscribed to Newsletter. Update subscriptions in Settings (⚙️)."
                         )
                     else:
                         _qs_title = _nl_title or "Endometriosis Newsletter"
@@ -2381,11 +2391,11 @@ with tab_trials:
 
 
 # ============================================================
-# Tab: Report Config
+# Settings page (⚙️ button; was the Report Config tab)
 # ============================================================
 with tab_nl_config:
     if _CONFIG_VIEW and st.session_state.pop("config_scroll_top", False):
-        # Open Report Config at the top, not at the tab page's scroll position.
+        # Open Settings at the top, not at the tab page's scroll position.
         # Drawn inside this container so the tabs' layout position never changes.
         _st_components.html(
             "<script>const d=window.parent.document;"
@@ -2397,12 +2407,23 @@ with tab_nl_config:
 
     st.markdown(
         "<div style='font-size:22px;font-weight:700;margin-bottom:4px'>"
-        "Report Config</div>"
+        "⚙️ Settings</div>"
         "<div style='font-size:13px;color:#7f8c8d;margin-bottom:20px'>"
-        "Manage the mailing list for the daily Intelligence Briefing and "
+        "Manage users, the email mailing list, the daily send schedule, and "
         "send test dispatches on demand.</div>",
         unsafe_allow_html=True,
     )
+
+    # ── Users ─────────────────────────────────────────────────
+    from src.ui.users_settings import render_users as _render_users
+
+    try:
+        _render_users()
+    except Exception as _users_exc:
+        st.error(f"Users could not be loaded: {_users_exc}")
+
+    st.markdown("---")
+    st.markdown("### 📧 Email & Schedule")
 
     # ── SMTP status banner ────────────────────────────────────
     _nlc_smtp = load_smtp_config()

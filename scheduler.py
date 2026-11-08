@@ -2,7 +2,7 @@
 scheduler.py — runs the daily Intelligence Briefing / Newsletter send on a schedule.
 
 Started next to the Streamlit app by deploy/start.sh in the Docker image. Every minute
-it checks whether the daily send is due (time set in the Report Config tab, read in
+it checks whether the daily send is due (time set in Settings (⚙️), read in
 SEND_TIMEZONE) and, if so, runs `send_daily_briefing.py --auto-search` in a child
 process. send_daily_briefing.py records each day's send, so it never sends twice.
 

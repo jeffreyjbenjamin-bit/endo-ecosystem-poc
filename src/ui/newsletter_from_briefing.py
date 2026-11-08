@@ -26,7 +26,7 @@ import html as html_lib
 import json
 import re
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import streamlit as st
 
@@ -1088,6 +1088,7 @@ def _generate_and_open(
             "source": a.get("source", ""),
             "published_date": a.get("published_date", ""),
             "reason": a.get("reason", ""),
+            "snippet": (a.get("snippet") or "")[:1500],
         }
         for i, a in enumerate(base + supporting)
     ]
@@ -1160,7 +1161,7 @@ def _send_dialog(deps: Dict[str, Any], nid: int, title: str, md: str) -> None:
     if not recips:
         st.warning(
             "No one is subscribed to the Newsletter. Add recipients or change "
-            "subscriptions in Report Config."
+            "subscriptions in Settings (⚙️)."
         )
         return
     subject = f"Evidence Gap — {title}"
@@ -1302,7 +1303,7 @@ def render_editor_page(deps: Dict[str, Any]) -> None:
                 if queued
                 else (
                     "Saves, then emails it to newsletter subscribers with the next "
-                    "scheduled daily briefing (Report Config sets the time)"
+                    "scheduled daily briefing (Settings ⚙️ sets the time)"
                 )
             ),
         )
@@ -1370,9 +1371,7 @@ def render_editor_page(deps: Dict[str, Any]) -> None:
         deps["html_component"](html, height=780, scrolling=True)
 
     if st.session_state.get(_k("chat_open")):
-        _render_chat(
-            deps, nid, title, nl.get("coverage_period") or "", st.session_state[md_key]
-        )
+        _render_chat(deps, nid, nl, title, st.session_state[md_key])
 
 
 # ============================================================
@@ -1382,20 +1381,41 @@ def render_editor_page(deps: Dict[str, Any]) -> None:
 CHAT_SYSTEM = """\
 You are an editorial assistant inside Evidence Gap, a newsletter tool for life \
 sciences professionals focused on endometriosis. The user is editing the newsletter \
-below and asks you questions about it.
+below and asks you questions about it. The SOURCES are the articles the newsletter \
+was written from; the newsletter cites them as [N].
 
 How to answer:
-- Ground answers in the newsletter. Quote or point to the section you mean.
-- When asked to rewrite, shorten, retitle or restructure, give the revised text in \
-Markdown that can be pasted straight into the newsletter.
-- If something is not in the newsletter, say so before adding general background, \
-and label general knowledge as such. Never invent studies, numbers, trial names or \
-quotes; flag claims in the newsletter that look unsupported.
-- You cannot change the document yourself; the user copies your suggestions in.
+- Ground answers in the newsletter and its sources. Quote or point to the section \
+or source [N] you mean.
+- Use the sources to check claims: say when the newsletter goes beyond, or \
+misstates, what a source says. Only source titles and summaries are available, not \
+full texts.
+- If something is in neither, say so before adding general background, and label \
+general knowledge as such. Never invent studies, numbers, trial names or quotes.
 - Be concise.
+
+Suggesting edits:
+Whenever the user asks for a change, or you recommend one, include each change as \
+an edit block that the app shows with an Apply button:
+<<<EDIT
+FIND:
+exact text copied from the newsletter, character for character, long enough to be \
+unique (usually a whole sentence or paragraph)
+REPLACE:
+the new text, in Markdown
+>>>
+- FIND must match the newsletter exactly, including Markdown such as ** and [N].
+- To insert text, FIND the neighbouring sentence and REPLACE it with that sentence \
+plus the new text. To delete, leave REPLACE empty.
+- Keep citations [N] that still apply; add a citation only from the SOURCES.
+- Put a one-line reason before each block. Do not repeat the block's text elsewhere.
 
 NEWSLETTER TITLE: {title}
 COVERAGE: {coverage}
+
+SOURCES:
+{sources}
+
 NEWSLETTER (Markdown, including any unsaved edits):
 <<<
 {document}
@@ -1404,24 +1424,146 @@ NEWSLETTER (Markdown, including any unsaved edits):
 CHAT_STARTERS = [
     "Summarize this newsletter in 3 bullets",
     "Suggest 3 better titles",
-    "Which claims need a citation or look unsupported?",
+    "Check each claim against the sources",
     "Tighten the lead story to under 150 words",
 ]
 _CHAT_MAX_DOC_CHARS = 60_000
+_CHAT_MAX_SOURCE_CHARS = 1_200
 _CHAT_HISTORY_TURNS = 12
+_EDIT_RE = re.compile(
+    r"<<<\s*EDIT\s*\n\s*FIND:\s*\n(.*?)\n\s*REPLACE:[ \t]*\n?(.*?)\n?\s*>>>",
+    re.S,
+)
 
 
-def chat_system_prompt(title: str, coverage: str, document: str) -> str:
+def newsletter_sources(
+    nl: Dict[str, Any], runs: Optional[List[Dict[str, Any]]] = None
+) -> List[Dict[str, str]]:
+    """The newsletter's source articles, numbered as the newsletter cites them.
+
+    Newsletters saved before summaries were stored get them from the
+    Intelligence Briefing they were built from (matched by URL).
+    """
+    try:
+        raw = json.loads(nl.get("sources_json") or "[]")
+    except (TypeError, ValueError):
+        raw = []
+    try:
+        cfg = json.loads(nl.get("config_json") or "{}")
+    except (TypeError, ValueError):
+        cfg = {}
+    by_url: Dict[str, Dict[str, Any]] = {}
+    run_id = cfg.get("briefing_run_id")
+    for run in runs or []:
+        if run.get("id") == run_id:
+            try:
+                for s in json.loads(run.get("sources_json") or "[]"):
+                    by_url[_url_key(s.get("url", ""))] = s
+            except (TypeError, ValueError):
+                pass
+    out = []
+    for s in raw if isinstance(raw, list) else []:
+        if not isinstance(s, dict):
+            continue
+        if "content" in s and "title" not in s:  # original Newsletter Builder
+            text = str(s.get("content") or "").strip()
+            out.append(
+                {
+                    "role": s.get("section") or "",
+                    "title": text.splitlines()[0][:200] if text else "Untitled",
+                    "source": s.get("source_type") or "",
+                    "date": "",
+                    "url": "",
+                    "summary": text,
+                }
+            )
+            continue
+        summary = s.get("snippet") or ""
+        if not summary and s.get("url"):
+            summary = (by_url.get(_url_key(s["url"])) or {}).get("snippet") or ""
+        if s.get("reason"):
+            summary = (summary + f" (Related because: {s['reason']})").strip()
+        out.append(
+            {
+                "role": s.get("role") or "",
+                "title": s.get("title") or "Untitled",
+                "source": s.get("source") or "",
+                "date": s.get("published_date") or "",
+                "url": s.get("url") or "",
+                "summary": summary,
+            }
+        )
+    return out
+
+
+def sources_block(sources: List[Dict[str, str]]) -> str:
+    if not sources:
+        return "(no source list saved for this newsletter)"
+    lines = []
+    for n, s in enumerate(sources, start=1):
+        meta = " · ".join(x for x in [s["role"], s["source"], s["date"]] if x)
+        lines.append(f"[{n}] {s['title']}" + (f" ({meta})" if meta else ""))
+        if s["url"]:
+            lines.append(f"    URL: {s['url']}")
+        summary = " ".join((s["summary"] or "").split())
+        if summary:
+            if len(summary) > _CHAT_MAX_SOURCE_CHARS:
+                summary = summary[:_CHAT_MAX_SOURCE_CHARS] + "…"
+            lines.append(f"    Summary: {summary}")
+    return "\n".join(lines)
+
+
+def chat_system_prompt(
+    title: str,
+    coverage: str,
+    document: str,
+    sources: Optional[List[Dict[str, str]]] = None,
+) -> str:
     doc = document or "(empty)"
     if len(doc) > _CHAT_MAX_DOC_CHARS:
         doc = doc[:_CHAT_MAX_DOC_CHARS] + "\n…(truncated)"
-    return CHAT_SYSTEM.format(title=title, coverage=coverage or "n/a", document=doc)
+    return CHAT_SYSTEM.format(
+        title=title,
+        coverage=coverage or "n/a",
+        sources=sources_block(sources or []),
+        document=doc,
+    )
 
 
-def chat_messages(system: str, history: List[Dict[str, str]]) -> List[Dict[str, str]]:
+def chat_messages(system: str, history: List[Dict[str, Any]]) -> List[Dict[str, str]]:
     """System prompt plus the most recent turns of the conversation."""
     recent = history[-_CHAT_HISTORY_TURNS * 2 :]
-    return [{"role": "system", "content": system}] + recent
+    return [{"role": "system", "content": system}] + [
+        {"role": m["role"], "content": m["content"]} for m in recent
+    ]
+
+
+def parse_edits(answer: str) -> Tuple[str, List[Dict[str, str]]]:
+    """(answer text without edit blocks, [{find, replace}])."""
+    edits = [
+        {"find": m.group(1).strip("\n"), "replace": m.group(2).strip("\n")}
+        for m in _EDIT_RE.finditer(answer or "")
+    ]
+    n = iter(range(1, len(edits) + 1))
+    text = _EDIT_RE.sub(lambda _m: f"*(suggested edit {next(n)} below)*", answer or "")
+    return text.strip(), [e for e in edits if e["find"].strip()]
+
+
+def apply_edit(document: str, find: str, replace: str) -> Optional[str]:
+    """Replace the first occurrence of `find`, ignoring whitespace differences.
+
+    Returns the new document, or None if the text was not found.
+    """
+    if find and find in document:
+        return document.replace(find, replace, 1)
+    words = find.split()
+    if not words:
+        return None
+    pattern = r"\s+".join(re.escape(w) for w in words)
+    m = re.search(pattern, document)
+    if not m:
+        return None
+    return document[: m.start()] + replace + document[m.end() :]
 
 
 def _chat_stream(deps: Dict[str, Any], messages: List[Dict[str, str]]):
@@ -1430,14 +1572,14 @@ def _chat_stream(deps: Dict[str, Any], messages: List[Dict[str, str]]):
     client = deps["make_chat_client"](deploy)
     try:
         stream = client.chat.completions.create(
-            model=deploy, messages=messages, max_completion_tokens=2000, stream=True
+            model=deploy, messages=messages, max_completion_tokens=3000, stream=True
         )
         for chunk in stream:
             if chunk.choices and chunk.choices[0].delta.content:
                 yield chunk.choices[0].delta.content
     except Exception:
         resp = client.chat.completions.create(
-            model=deploy, messages=messages, max_completion_tokens=2000
+            model=deploy, messages=messages, max_completion_tokens=3000
         )
         yield resp.choices[0].message.content or ""
 
@@ -1450,37 +1592,115 @@ def _queue_question(nid: int, text: str) -> None:
     st.session_state[_k(f"chat_q_{nid}")] = text
 
 
+def _apply_chat_edits(nid: int, msg_i: int, edit_is: List[int]) -> None:
+    """Apply suggested edits to the newsletter being edited (not saved yet)."""
+    md_key, ver_key = _k(f"ed_md_{nid}"), _k(f"ed_ver_{nid}")
+    msg = st.session_state[_k(f"chat_{nid}")][msg_i]
+    doc = st.session_state[md_key]
+    changed = False
+    for i in edit_is:
+        e = msg["edits"][i]
+        if e.get("status") == "applied":
+            continue
+        new = apply_edit(doc, e["find"], e["replace"])
+        if new is None:
+            e["status"] = "missing"
+        else:
+            doc, e["status"], changed = new, "applied", True
+    if changed:
+        st.session_state[md_key] = doc
+        st.session_state[ver_key] = st.session_state.get(ver_key, 0) + 1
+
+
 _CHAT_CSS = """<style>
   .st-key-nb2_chat {
-    position:fixed; top:60px; right:0; bottom:52px; width:min(430px, 100vw);
+    position:fixed; top:60px; right:0; bottom:52px; width:min(450px, 100vw);
     z-index:999; background:#f8faff; border-left:1px solid #dde4ef;
     box-shadow:-8px 0 24px rgba(0,0,0,0.12); padding:14px 16px;
     display:flex; flex-direction:column; flex-wrap:nowrap; gap:0.5rem;
   }
-  .st-key-nb2_chat_msgs { flex:1 1 auto; height:auto !important; min-height:0;
-    max-height:none !important; }
+  /* Messages fill the panel: Streamlit gives the height=480 container (and its
+     wrapper) a fixed height, so let the wrapper flex and the list fill it. */
+  .st-key-nb2_chat > [data-testid="stLayoutWrapper"]:has(> .st-key-nb2_chat_msgs) {
+    flex:1 1 auto; height:auto !important; max-height:none !important; min-height:0;
+  }
+  .st-key-nb2_chat_msgs { height:100% !important; max-height:none !important; }
   .st-key-nb2_chat [data-testid="stChatMessage"] { padding:0.5rem 0.6rem; }
   .st-key-nb2_chat [data-testid="stChatMessage"] p { font-size:0.9rem; }
   .nb2-chat-title { font-weight:700; font-size:1.05rem; color:#0d2137; }
   .nb2-chat-sub { font-size:0.78rem; color:#7f8c8d; margin-top:-4px; }
+  .nb2-edit { border:1px solid #dde4ef; border-radius:8px; background:#fff;
+    padding:8px 10px; margin:6px 0 4px 0; font-size:0.82rem; }
+  .nb2-edit .lbl { font-size:0.7rem; font-weight:700; text-transform:uppercase;
+    letter-spacing:.04em; color:#7f8c8d; margin-bottom:3px; }
+  .nb2-edit .old { background:#fdecec; color:#8a1f1f; text-decoration:line-through;
+    border-radius:4px; padding:4px 6px; white-space:pre-wrap; margin-bottom:4px; }
+  .nb2-edit .new { background:#e8f6ee; color:#14532d; border-radius:4px;
+    padding:4px 6px; white-space:pre-wrap; }
+  .nb2-edit .ok { color:#1e7e4a; font-weight:600; }
+  .nb2-edit .miss { color:#b45309; }
   @media (min-width: 1280px) {
-    [data-testid="stMainBlockContainer"] { padding-right: 450px !important; }
+    [data-testid="stMainBlockContainer"] { padding-right: 470px !important; }
   }
 </style>"""
 
 
+def _edit_card(n: int, e: Dict[str, str]) -> str:
+    old = _esc(e["find"])
+    new = _esc(e["replace"]) or "<i>(delete)</i>"
+    status = {
+        "applied": "<div class='ok'>✓ Applied to the newsletter (not saved yet)</div>",
+        "missing": "<div class='miss'>Couldn't find this text in the newsletter; "
+        "it may have changed. Edit it by hand.</div>",
+    }.get(e.get("status", ""), "")
+    return (
+        f"<div class='nb2-edit'><div class='lbl'>Suggested edit {n}</div>"
+        f"<div class='old'>{old}</div><div class='new'>{new}</div>{status}</div>"
+    )
+
+
+def _render_message(nid: int, msg_i: int, m: Dict[str, Any]) -> None:
+    with st.chat_message(m["role"]):
+        if m["role"] != "assistant":
+            st.markdown(m["content"])
+            return
+        text, _ = parse_edits(m["content"])
+        st.markdown(text or "_(suggested edits below)_")
+        edits = m.get("edits") or []
+        for i, e in enumerate(edits):
+            st.markdown(_edit_card(i + 1, e), unsafe_allow_html=True)
+            if e.get("status") != "applied":
+                st.button(
+                    f"Apply edit {i + 1}",
+                    key=_k(f"chat_apply_{nid}_{msg_i}_{i}_btn"),
+                    on_click=_apply_chat_edits,
+                    args=(nid, msg_i, [i]),
+                    type="primary",
+                )
+        pending = [i for i, e in enumerate(edits) if e.get("status") != "applied"]
+        if len(pending) > 1:
+            st.button(
+                f"Apply all {len(pending)} edits",
+                key=_k(f"chat_apply_all_{nid}_{msg_i}_btn"),
+                on_click=_apply_chat_edits,
+                args=(nid, msg_i, pending),
+            )
+
+
 def _render_chat(
-    deps: Dict[str, Any], nid: int, title: str, coverage: str, md: str
+    deps: Dict[str, Any], nid: int, nl: Dict[str, Any], title: str, md: str
 ) -> None:
-    """Right-hand AI chat panel. The model sees the newsletter as currently edited."""
+    """Right-hand AI chat panel. The model sees the newsletter as currently
+    edited plus its source articles, and can suggest edits to apply."""
     hist_key, q_key = _k(f"chat_{nid}"), _k(f"chat_q_{nid}")
-    history: List[Dict[str, str]] = st.session_state.setdefault(hist_key, [])
+    history: List[Dict[str, Any]] = st.session_state.setdefault(hist_key, [])
     st.markdown(_CHAT_CSS, unsafe_allow_html=True)
     with st.container(key="nb2_chat"):
         h1, h2, h3 = st.columns([0.62, 0.22, 0.16], vertical_alignment="center")
         h1.markdown(
             "<div class='nb2-chat-title'>💬 Ask AI</div>"
-            "<div class='nb2-chat-sub'>Answers use this newsletter as context</div>",
+            "<div class='nb2-chat-sub'>Uses this newsletter and its sources · "
+            "can suggest edits</div>",
             unsafe_allow_html=True,
         )
         if h2.button("Clear", key=_k(f"chat_clear_{nid}_btn"), disabled=not history):
@@ -1505,28 +1725,28 @@ def _render_chat(
                         args=(nid, s),
                         use_container_width=True,
                     )
-            for m in history:
-                with st.chat_message(m["role"]):
-                    st.markdown(m["content"])
+            for i, m in enumerate(history):
+                _render_message(nid, i, m)
         typed = st.chat_input("Ask about this newsletter…", key=_k(f"chat_in_{nid}"))
         question = typed or st.session_state.pop(q_key, None)
         if question:
             history.append({"role": "user", "content": question})
+            sources = newsletter_sources(nl, deps["load_ai_runs"](50))
+            system = chat_system_prompt(
+                title, nl.get("coverage_period") or "", md, sources
+            )
             with msgs:
                 with st.chat_message("user"):
                     st.markdown(question)
                 with st.chat_message("assistant"):
                     try:
                         answer = st.write_stream(
-                            _chat_stream(
-                                deps,
-                                chat_messages(
-                                    chat_system_prompt(title, coverage, md), history
-                                ),
-                            )
+                            _chat_stream(deps, chat_messages(system, history))
                         )
                     except Exception as exc:
                         answer = f"⚠️ The AI request failed: {exc}"
                         st.markdown(answer)
-            history.append({"role": "assistant", "content": str(answer or "")})
+            answer = str(answer or "")
+            _, edits = parse_edits(answer)
+            history.append({"role": "assistant", "content": answer, "edits": edits})
             st.rerun()

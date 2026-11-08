@@ -14,6 +14,16 @@ footer. Keep each version's changes in its own <ul> list. -->
 
 <tr><td>2026-11-08</td><td>
 
+<b>v1.15.0</b>
+<ul>
+<li><b>Users</b>: a user list with types Admin, Physician, Payer, Patient and Researcher, started from the mailing list (everyone as Admin). Add, edit, deactivate and delete users, and import new mailing-list people, in Settings. Sign-in and permissions by type are not switched on yet.</li>
+<li>"Report Config" renamed to <b>Settings</b> (⚙️), with Users at the top and Email &amp; Schedule below.</li>
+<li>Ask AI now also gets the newsletter's <b>source articles</b> (titles, links and summaries), so it can check claims against them.</li>
+<li>Ask AI can <b>suggest edits</b>: each appears as a before/after card with an <b>Apply</b> button (and Apply all) that changes the newsletter in the editor, ready to review and save.</li>
+<li>The Ask AI chat now fills the whole panel height.</li>
+<li>Build Newsletter from Intel Briefing moved to the right of Clinical Trials.</li>
+</ul>
+
 <b>v1.14.0</b>
 <ul>
 <li><b>💬 Ask AI</b> on the newsletter editing page opens a chat panel on the right. The AI answers questions using the newsletter being edited, including unsaved changes, and can suggest rewrites to paste in. Starter questions, Clear and close are included, and the conversation is kept while you edit.</li>

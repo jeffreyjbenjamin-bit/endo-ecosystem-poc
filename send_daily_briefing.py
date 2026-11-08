@@ -5,7 +5,7 @@ On Azure this runs automatically: scheduler.py (started by deploy/start.sh in th
 Docker image) checks every minute and runs this script with --auto-search when due.
 Elsewhere, run it from a system scheduler (Windows Task Scheduler or cron).
 
-A scheduled run sends once per day, from the time configured in the Report Config tab
+A scheduled run sends once per day, from the time configured in Settings (⚙️)
 until 2 hours after it. The time is read in SEND_TIMEZONE (e.g. America/New_York),
 or the system's local time zone if that isn't set.
 
