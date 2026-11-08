@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from datetime import datetime
 from html import escape
@@ -30,6 +31,11 @@ _CSS = """
 .home-trend-head { font-size:13px; color:#566573; font-style:italic; margin-bottom:8px; min-height:2.6em; }
 .home-trend { margin-bottom:10px; }
 .home-trend b { color:#1a2b3c; }
+.home-str { display:flex; align-items:center; gap:6px; margin:3px 0 2px 0; }
+.home-str .bar { flex:0 0 90px; height:6px; background:#eef2f7; border-radius:3px; overflow:hidden; }
+.home-str .bar span { display:block; height:100%; background:#2a78d6; border-radius:3px; }
+.home-str .n { font-size:11px; color:#52514e; }
+.home-chart-sub { font-size:12px; color:#7f8c8d; margin:-6px 0 4px 0; }
 .home-trend .det { font-size:13px; color:#34495e; line-height:1.45; }
 .home-chip { display:inline-block; font-size:10px; font-weight:700; text-transform:uppercase;
   padding:1px 6px; border-radius:4px; margin-left:6px; vertical-align:1px; }
@@ -318,8 +324,153 @@ def _images(urls: tuple) -> Dict[str, str]:
     return images_for(list(urls))
 
 
+# Reference palette (dataviz skill): categorical slots 1-3 and the blue sequential ramp.
+SERIES = {
+    "Articles": "#2a78d6",
+    "Press releases": "#eb6834",
+    "Clinical trials": "#1baf7a",
+}
+SEQ_BLUE = ["#cde2fb", "#9ec5f4", "#6da7ec", "#3987e5", "#256abf", "#184f95", "#104281"]
+_TEXT_2 = "#52514e"
+_GRID = "#e4e2dc"
+
+
+def _month_label(key: str) -> str:
+    try:
+        return datetime.strptime(key, "%Y-%m").strftime("%b %y")
+    except ValueError:
+        return key
+
+
+def trend_month_counts(
+    trends: List[Dict[str, Any]], months: List[str]
+) -> List[Dict[str, Any]]:
+    """Supporting items per trend per month (zeros kept) for the heatmap."""
+    rows = []
+    for t in trends:
+        counts: Dict[str, int] = {}
+        for e in t.get("evidence") or []:
+            counts[e["date"][:7]] = counts.get(e["date"][:7], 0) + 1
+        for m in months:
+            rows.append({"trend": t["title"], "month": m, "count": counts.get(m, 0)})
+    return rows
+
+
+def _activity_chart(activity: List[Dict[str, Any]]):
+    import altair as alt
+    import pandas as pd
+
+    df = pd.DataFrame(activity)
+    df["label"] = df["month"].map(_month_label)
+    order = list(dict.fromkeys(df["label"]))
+    kinds = list(SERIES)
+    return (
+        alt.Chart(df)
+        .mark_bar(stroke="#ffffff", strokeWidth=1, cornerRadius=2)
+        .encode(
+            x=alt.X(
+                "label:N",
+                sort=order,
+                title=None,
+                axis=alt.Axis(
+                    labelAngle=0, labelColor=_TEXT_2, ticks=False, domainColor=_GRID
+                ),
+            ),
+            y=alt.Y(
+                "sum(count):Q",
+                title="Items",
+                axis=alt.Axis(
+                    grid=True,
+                    gridColor=_GRID,
+                    labelColor=_TEXT_2,
+                    titleColor=_TEXT_2,
+                    domain=False,
+                    ticks=False,
+                    tickCount=4,
+                ),
+            ),
+            color=alt.Color(
+                "kind:N",
+                sort=kinds,
+                scale=alt.Scale(domain=kinds, range=list(SERIES.values())),
+                legend=alt.Legend(title=None, orient="top", labelColor=_TEXT_2),
+            ),
+            order=alt.Order("kind_order:Q"),
+            tooltip=[
+                alt.Tooltip("label:N", title="Month"),
+                alt.Tooltip("kind:N", title="Type"),
+                alt.Tooltip("count:Q", title="Items"),
+            ],
+        )
+        .transform_calculate(kind_order=f"indexof({json.dumps(kinds)}, datum.kind)")
+        .properties(height=260)
+    )
+
+
+def _heatmap(rows: List[Dict[str, Any]], months: List[str]):
+    import altair as alt
+    import pandas as pd
+
+    df = pd.DataFrame(rows)
+    df["label"] = df["month"].map(_month_label)
+    order = [_month_label(m) for m in months]
+    trends = list(dict.fromkeys(df["trend"]))
+    return (
+        alt.Chart(df)
+        .mark_rect(stroke="#ffffff", strokeWidth=2, cornerRadius=3)
+        .encode(
+            x=alt.X(
+                "label:N",
+                sort=order,
+                title=None,
+                axis=alt.Axis(
+                    labelAngle=0, labelColor=_TEXT_2, ticks=False, domain=False
+                ),
+            ),
+            y=alt.Y(
+                "trend:N",
+                sort=trends,
+                title=None,
+                axis=alt.Axis(
+                    labelColor="#0b0b0b", labelLimit=230, ticks=False, domain=False
+                ),
+            ),
+            color=alt.Color(
+                "count:Q",
+                title="Sources",
+                scale=alt.Scale(range=SEQ_BLUE, domainMin=0),
+                legend=alt.Legend(
+                    orient="top",
+                    labelColor=_TEXT_2,
+                    titleColor=_TEXT_2,
+                    gradientLength=160,
+                ),
+            ),
+            tooltip=[
+                alt.Tooltip("trend:N", title="Trend"),
+                alt.Tooltip("label:N", title="Month"),
+                alt.Tooltip("count:Q", title="Supporting sources"),
+            ],
+        )
+        .properties(height=max(150, 44 * len(trends)))
+    )
+
+
+def _strength_bar(n: int, top: int) -> str:
+    """Thin inline bar: how many collected items support a trend (vs the window's top)."""
+    if not n:
+        return ""
+    pct = max(6, round(100 * n / max(top, 1)))
+    return (
+        f"<div class='home-str' title='{n} supporting sources'>"
+        f"<span class='bar'><span style='width:{pct}%'></span></span>"
+        f"<span class='n'>{n} source{'s' if n != 1 else ''}</span></div>"
+    )
+
+
 def _render_trends() -> None:
     from src.pipelines.trends import WINDOWS, generate_trends, load_trends
+    from src.services import ai_service as ai
 
     with st.container(border=True, key="home_trends"):
         head_l, head_r = st.columns([4, 1], vertical_alignment="center")
@@ -331,11 +482,11 @@ def _render_trends() -> None:
             key="home_trends_refresh",
             use_container_width=True,
             help="Re-analyze everything collected (briefings, evidence library and "
-            "clinical trials). Takes about 15–30 seconds. Also runs after each "
-            "daily briefing.",
+            f"clinical trials) with {ai.provider_status('trends')}. Takes about 30–90 "
+            "seconds. Also runs after each daily briefing.",
         )
         if refresh:
-            with st.spinner("Analyzing trends…"):
+            with st.spinner(f"Analyzing trends with {ai.provider_status('trends')}…"):
                 try:
                     generate_trends()
                 except Exception as exc:
@@ -347,10 +498,12 @@ def _render_trends() -> None:
                 "of the past week, month and year."
             )
             return
+        windows = data.get("windows") or {}
         cols = st.columns(3, gap="medium")
         for col, (key, label, _days) in zip(cols, WINDOWS):
-            w = (data.get("windows") or {}).get(key) or {}
+            w = windows.get(key) or {}
             n = (data.get("counts") or {}).get(key, 0)
+            top = max([t.get("n_evidence", 0) for t in w.get("trends") or []] + [0])
             html = [
                 f"<div class='home-h' style='font-size:15px'>{label} "
                 f"<span style='font-weight:400;color:#7f8c8d;font-size:12px'>"
@@ -366,14 +519,66 @@ def _render_trends() -> None:
                 )
                 html.append(
                     f"<div class='home-trend'><b>{escape(t['title'])}</b>{chip}"
+                    f"{_strength_bar(t.get('n_evidence', 0), top)}"
                     f"<div class='det'>{escape(t.get('detail', ''))}</div></div>"
                 )
             col.markdown("".join(html), unsafe_allow_html=True)
+
+        # ── Charts ──────────────────────────────────────────────
+        activity = data.get("activity") or []
+        year_trends = [
+            t
+            for t in (windows.get("year") or {}).get("trends") or []
+            if t.get("evidence")
+        ]
+        if activity or year_trends:
+            months = list(dict.fromkeys(a["month"] for a in activity))
+            c1, c2 = st.columns([1.25, 1], gap="large")
+            if year_trends and months:
+                rows = trend_month_counts(year_trends, months)
+                with c1:
+                    st.markdown(
+                        "<div class='home-h' style='font-size:15px'>Past-year trends "
+                        "by month</div><div class='home-chart-sub'>Supporting sources "
+                        "per trend each month (darker = more)</div>",
+                        unsafe_allow_html=True,
+                    )
+                    st.altair_chart(_heatmap(rows, months), use_container_width=True)
+            if activity:
+                with c2:
+                    st.markdown(
+                        "<div class='home-h' style='font-size:15px'>What's being "
+                        "published</div><div class='home-chart-sub'>Items collected per "
+                        "month by type</div>",
+                        unsafe_allow_html=True,
+                    )
+                    st.altair_chart(_activity_chart(activity), use_container_width=True)
+            with st.expander("Chart data"):
+                import pandas as pd
+
+                if year_trends and months:
+                    st.dataframe(
+                        pd.DataFrame(trend_month_counts(year_trends, months)).pivot(
+                            index="trend", columns="month", values="count"
+                        ),
+                        use_container_width=True,
+                    )
+                if activity:
+                    st.dataframe(
+                        pd.DataFrame(activity).pivot(
+                            index="kind", columns="month", values="count"
+                        ),
+                        use_container_width=True,
+                    )
+
+        model = data.get("model", "")
         st.caption(
             f"Analyzed {_fmt_date(data.get('generated_at'))} "
-            f"{str(data.get('generated_at', ''))[11:16]} UTC by AI ({data.get('model', '')}) "
+            f"{str(data.get('generated_at', ''))[11:16]} UTC by "
+            f"{ai.model_name(model) if str(model).startswith('claude') else model} "
             "from Intelligence Briefing results, the evidence library and clinical "
-            "trials. Check important points against the sources."
+            "trials. Source counts come from the collected items each trend cites. "
+            "Check important points against the sources."
         )
 
 

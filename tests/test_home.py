@@ -170,3 +170,83 @@ def test_development_cards_parse_both_link_styles():
     refs = reference_urls(BRIEFING + "\n[2] B. https://b.com/t\n")
     d = parse_development("**Blood test cleared.** [2] More.", refs)
     assert d["url"] == "https://b.com/t"
+
+
+def test_trend_evidence_is_checked_and_charted():
+    from src.pipelines.trends import SCHEMA, monthly_activity
+    from src.ui.home_tab import trend_month_counts
+
+    runs = [
+        {
+            "run_ts": "2026-11-06T07:00:00+00:00",
+            "sources_json": json.dumps(
+                [
+                    {
+                        "title": "A new",
+                        "published_date": "2026-11-05",
+                        "source_name": "x",
+                    },
+                    {
+                        "title": "B press",
+                        "published_date": "2026-10-02",
+                        "source_name": "y",
+                        "is_press_release": True,
+                    },
+                ]
+            ),
+        }
+    ]
+    docs = [{"title": "C old", "published_date": "2026-01-15", "source": "pubmed"}]
+    items = collect_items(runs, docs, [])
+    today = date(2026, 11, 7)
+    ids = {i["title"]: i["id"] for i in items}
+    assert f"[{ids['A new']}] 2026-11-05" in build_prompt(items, today)
+
+    raw = json.dumps(
+        {
+            "week": {
+                "headline": "W",
+                "trends": [
+                    # C is not in the week window and 999 doesn't exist: both dropped
+                    {
+                        "title": "T",
+                        "detail": "d",
+                        "signal": "new",
+                        "evidence": [ids["A new"], ids["C old"], 999, ids["A new"]],
+                    }
+                ],
+            },
+            "month": {"headline": "M", "trends": []},
+            "year": {
+                "headline": "Y",
+                "trends": [
+                    {
+                        "title": "Y1",
+                        "detail": "d",
+                        "signal": "rising",
+                        "evidence": [ids["A new"], ids["B press"], ids["C old"]],
+                    }
+                ],
+            },
+        }
+    )
+    parsed = parse_response(raw, items, today)
+    week = parsed["week"]["trends"][0]
+    assert week["n_evidence"] == 1 and week["evidence"][0]["title"] == "A new"
+    year = parsed["year"]["trends"][0]
+    assert year["n_evidence"] == 3
+
+    act = monthly_activity(items, today)
+    months = list(dict.fromkeys(a["month"] for a in act))
+    assert months[0] == "2025-12" and months[-1] == "2026-11" and len(months) == 12
+    nov = {a["kind"]: a["count"] for a in act if a["month"] == "2026-11"}
+    assert nov == {"Articles": 1, "Press releases": 0, "Clinical trials": 0}
+
+    rows = trend_month_counts(parsed["year"]["trends"], months)
+    by = {r["month"]: r["count"] for r in rows}
+    assert by["2026-11"] == 1 and by["2026-10"] == 1 and by["2026-01"] == 1
+    assert sum(by.values()) == 3 and len(rows) == 12
+
+    # schema is strict JSON-schema (structured outputs need additionalProperties false)
+    assert SCHEMA["additionalProperties"] is False
+    assert set(SCHEMA["required"]) == {"week", "month", "year"}

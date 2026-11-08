@@ -234,3 +234,17 @@ def test_stream_retries_only_before_text_arrives(env):
     _use(env, client)
     assert "".join(ai.stream_text("chat", system="S", prompt="q")) == "ok"
     assert len(client.calls) == 2
+
+
+def test_trends_provider_and_structured_output(env):
+    assert ai.provider_for("trends") == "anthropic"
+    env.setenv("TRENDS_AI_PROVIDER", "azure")
+    assert ai.provider_for("trends") == "azure"
+    assert ai.provider_for("newsletter") == "anthropic"  # independent settings
+    env.delenv("TRENDS_AI_PROVIDER")
+    client = FakeClient(FakeStream(_final(text='{"week": {}}')))
+    _use(env, client)
+    schema = {"type": "object", "properties": {}, "additionalProperties": False}
+    ai.generate("trends", system="S", prompt="p", json_schema=schema)
+    oc = client.calls[0][1]["output_config"]
+    assert oc == {"effort": "high", "format": {"type": "json_schema", "schema": schema}}

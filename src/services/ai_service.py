@@ -26,8 +26,10 @@ Configuration (environment variables; no code changes needed):
     ANTHROPIC_FALLBACKS           "default" (server-side refusal fallback) or "off"
     ANTHROPIC_PRICE_<MODEL>       "input,output[,cache_write,cache_read]" USD per 1M tokens,
                                   e.g. ANTHROPIC_PRICE_CLAUDE_SONNET_5_5=2,10,2.5,0.2
-    NEWSLETTER_AI_PROVIDER        anthropic (default) | azure  - which provider the
-                                  newsletter features use
+    NEWSLETTER_AI_PROVIDER        anthropic (default) | azure  - provider for the
+                                  newsletter features (newsletter, chat)
+    TRENDS_AI_PROVIDER            anthropic (default) | azure  - provider for the
+                                  Home page AI trend analysis
 
 Every call is logged (Python logging, logger "evidence_gap.ai") with input, output
 and cache tokens and an estimated cost, and recorded in ai_usage.sqlite in the app
@@ -75,6 +77,18 @@ FEATURES: Dict[str, Dict[str, Any]] = {
         "effort": "medium",
         "max_tokens": 16000,
     },
+    "trends": {
+        "label": "AI trend analysis (Home)",
+        "effort": "high",
+        "max_tokens": 32000,
+    },
+}
+
+# Which setting picks the provider for each feature.
+_PROVIDER_ENV = {
+    "newsletter": "NEWSLETTER_AI_PROVIDER",
+    "chat": "NEWSLETTER_AI_PROVIDER",
+    "trends": "TRENDS_AI_PROVIDER",
 }
 _DEFAULT_FEATURE = {"label": "AI", "effort": "medium", "max_tokens": 16000}
 
@@ -210,14 +224,18 @@ def effort_for(feature: str) -> str:
     return FEATURES.get(feature, _DEFAULT_FEATURE)["effort"]
 
 
-def provider_for(feature: str) -> str:
-    """'anthropic' or 'azure' for a newsletter feature.
+def _provider_choice(feature: str) -> str:
+    env = _PROVIDER_ENV.get(feature, f"{feature.upper()}_AI_PROVIDER")
+    return _env(env, "anthropic").lower()
 
-    NEWSLETTER_AI_PROVIDER=azure switches back to Azure OpenAI; without an
-    ANTHROPIC_API_KEY the features stay on Azure OpenAI.
+
+def provider_for(feature: str) -> str:
+    """'anthropic' or 'azure' for a feature.
+
+    NEWSLETTER_AI_PROVIDER / TRENDS_AI_PROVIDER = azure switch a feature back to
+    Azure OpenAI; without an ANTHROPIC_API_KEY every feature stays on Azure OpenAI.
     """
-    choice = _env("NEWSLETTER_AI_PROVIDER", "anthropic").lower()
-    if choice == "azure" or not is_configured():
+    if _provider_choice(feature) == "azure" or not is_configured():
         return "azure"
     return "anthropic"
 
@@ -226,7 +244,7 @@ def provider_status(feature: str) -> str:
     """One-line description for the UI."""
     if provider_for(feature) == "anthropic":
         return model_name(model_for(feature))
-    if not is_configured() and _env("NEWSLETTER_AI_PROVIDER", "anthropic") != "azure":
+    if not is_configured() and _provider_choice(feature) != "azure":
         return "Azure OpenAI GPT-5.1 (Claude not set up: ANTHROPIC_API_KEY missing)"
     return "Azure OpenAI GPT-5.1"
 
@@ -423,7 +441,13 @@ def _messages_from(prompt: Optional[str], messages: Optional[List[Dict[str, str]
     raise ValueError("generate()/stream_text() need a prompt or messages")
 
 
-def _request(feature: str, system: str, messages, max_tokens: Optional[int]):
+def _request(
+    feature: str,
+    system: str,
+    messages,
+    max_tokens: Optional[int],
+    json_schema: Optional[Dict[str, Any]] = None,
+):
     model = model_for(feature)
     kwargs: Dict[str, Any] = {
         "model": model,
@@ -438,6 +462,12 @@ def _request(feature: str, system: str, messages, max_tokens: Optional[int]):
         # Adaptive thinking is on by default on current models; effort sets depth.
         "output_config": {"effort": effort_for(feature)},
     }
+    if json_schema:
+        # Structured output: the answer is guaranteed to be JSON matching the schema.
+        kwargs["output_config"]["format"] = {
+            "type": "json_schema",
+            "schema": json_schema,
+        }
     return model, kwargs
 
 
@@ -545,15 +575,18 @@ def generate(
     prompt: Optional[str] = None,
     messages: Optional[List[Dict[str, str]]] = None,
     max_tokens: Optional[int] = None,
+    json_schema: Optional[Dict[str, Any]] = None,
 ) -> AIResult:
     """Run one request to completion and return the text.
+
+    With json_schema, the text is JSON that matches the schema (structured output).
 
     Streams under the hood so long outputs never hit HTTP timeouts. The SDK
     retries rate limits and server/network errors; a failure that happens after
     the stream has started is retried here as well. Raises AIServiceError.
     """
     msgs = _messages_from(prompt, messages)
-    model, kwargs = _request(feature, system, msgs, max_tokens)
+    model, kwargs = _request(feature, system, msgs, max_tokens, json_schema)
     attempts = 1 + min(max_retries(), 2)
     for attempt in range(attempts):
         t0 = time.time()

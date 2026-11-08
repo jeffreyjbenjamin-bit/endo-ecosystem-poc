@@ -14,6 +14,14 @@ footer. Keep each version's changes in its own <ul> list. -->
 
 <tr><td>2026-11-08</td><td>
 
+<b>v1.17.0</b>
+<ul>
+<li>Home <b>AI trend analysis</b> now uses <b>Claude Sonnet 5.5</b> (GPT-5.1 if Claude isn't set up; switch with TRENDS_AI_PROVIDER).</li>
+<li>Each trend lists the collected sources that support it, shown as a source count with a small bar.</li>
+<li>New charts: <b>Past-year trends by month</b> (how many supporting sources each trend had each month) and <b>What's being published</b> (items collected per month: articles, press releases, clinical trials), with a Chart data table.</li>
+<li>The analysis covers more of the past year (up to 450 most recent items).</li>
+</ul>
+
 <b>v1.16.0</b>
 <ul>
 <li><b>Claude Sonnet 5.5</b> (Anthropic) now writes newsletters (Generate Newsletter) and powers the newsletter editor's <b>Ask AI</b> chat. Everything else stays on Azure OpenAI GPT-5.1.</li>
