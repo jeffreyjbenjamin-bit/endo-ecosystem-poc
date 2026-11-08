@@ -1116,7 +1116,7 @@ def _generate_and_open(
 _VIEW_PARAM = "view"
 _EDITOR_VIEW = "newsletter"
 # Buttons (and similar) can't have their state assigned, so preserve_state skips them
-_BUTTON_KEYS = ("_btn", "_flyout", "nb2_rm_", "nb2_ed_", "nb2_tt_")
+_BUTTON_KEYS = ("_btn", "_flyout", "nb2_rm_", "nb2_ed_", "nb2_tt_", "nb2_chat_in_")
 
 
 def preserve_state() -> None:
@@ -1268,7 +1268,9 @@ def render_editor_page(deps: Dict[str, Any]) -> None:
 
     md = st.session_state[md_key]
     dirty = md != saved_text
-    b1, b2, b3, b4, b5 = st.columns([1, 1, 1.25, 1.1, 1.4], vertical_alignment="center")
+    b1, b2, b3, b4, b5, b6 = st.columns(
+        [1, 1, 1.25, 1.1, 1.4, 0.95], vertical_alignment="center"
+    )
     with b1:
         if st.button(
             "💾 Save",
@@ -1324,6 +1326,17 @@ def render_editor_page(deps: Dict[str, Any]) -> None:
             )
             or "Visual"
         )
+    with b6:
+        chat_open = bool(st.session_state.get(_k("chat_open")))
+        st.button(
+            "💬 Ask AI",
+            key=_k("chat_toggle_btn"),
+            type="primary" if chat_open else "secondary",
+            on_click=_set_chat_open,
+            args=(not chat_open,),
+            use_container_width=True,
+            help="Chat with AI about this newsletter",
+        )
     if dirty:
         st.caption("● Unsaved changes")
 
@@ -1355,3 +1368,165 @@ def render_editor_page(deps: Dict[str, Any]) -> None:
             st.session_state[md_key],
         )
         deps["html_component"](html, height=780, scrolling=True)
+
+    if st.session_state.get(_k("chat_open")):
+        _render_chat(
+            deps, nid, title, nl.get("coverage_period") or "", st.session_state[md_key]
+        )
+
+
+# ============================================================
+# Editing page: AI chat flyout
+# ============================================================
+
+CHAT_SYSTEM = """\
+You are an editorial assistant inside Evidence Gap, a newsletter tool for life \
+sciences professionals focused on endometriosis. The user is editing the newsletter \
+below and asks you questions about it.
+
+How to answer:
+- Ground answers in the newsletter. Quote or point to the section you mean.
+- When asked to rewrite, shorten, retitle or restructure, give the revised text in \
+Markdown that can be pasted straight into the newsletter.
+- If something is not in the newsletter, say so before adding general background, \
+and label general knowledge as such. Never invent studies, numbers, trial names or \
+quotes; flag claims in the newsletter that look unsupported.
+- You cannot change the document yourself; the user copies your suggestions in.
+- Be concise.
+
+NEWSLETTER TITLE: {title}
+COVERAGE: {coverage}
+NEWSLETTER (Markdown, including any unsaved edits):
+<<<
+{document}
+>>>"""
+
+CHAT_STARTERS = [
+    "Summarize this newsletter in 3 bullets",
+    "Suggest 3 better titles",
+    "Which claims need a citation or look unsupported?",
+    "Tighten the lead story to under 150 words",
+]
+_CHAT_MAX_DOC_CHARS = 60_000
+_CHAT_HISTORY_TURNS = 12
+
+
+def chat_system_prompt(title: str, coverage: str, document: str) -> str:
+    doc = document or "(empty)"
+    if len(doc) > _CHAT_MAX_DOC_CHARS:
+        doc = doc[:_CHAT_MAX_DOC_CHARS] + "\n…(truncated)"
+    return CHAT_SYSTEM.format(title=title, coverage=coverage or "n/a", document=doc)
+
+
+def chat_messages(system: str, history: List[Dict[str, str]]) -> List[Dict[str, str]]:
+    """System prompt plus the most recent turns of the conversation."""
+    recent = history[-_CHAT_HISTORY_TURNS * 2 :]
+    return [{"role": "system", "content": system}] + recent
+
+
+def _chat_stream(deps: Dict[str, Any], messages: List[Dict[str, str]]):
+    """Yield the answer as it is generated (falls back to one piece)."""
+    deploy = deps["chat_deployment"]
+    client = deps["make_chat_client"](deploy)
+    try:
+        stream = client.chat.completions.create(
+            model=deploy, messages=messages, max_completion_tokens=2000, stream=True
+        )
+        for chunk in stream:
+            if chunk.choices and chunk.choices[0].delta.content:
+                yield chunk.choices[0].delta.content
+    except Exception:
+        resp = client.chat.completions.create(
+            model=deploy, messages=messages, max_completion_tokens=2000
+        )
+        yield resp.choices[0].message.content or ""
+
+
+def _set_chat_open(open_: bool) -> None:
+    st.session_state[_k("chat_open")] = open_
+
+
+def _queue_question(nid: int, text: str) -> None:
+    st.session_state[_k(f"chat_q_{nid}")] = text
+
+
+_CHAT_CSS = """<style>
+  .st-key-nb2_chat {
+    position:fixed; top:60px; right:0; bottom:52px; width:min(430px, 100vw);
+    z-index:999; background:#f8faff; border-left:1px solid #dde4ef;
+    box-shadow:-8px 0 24px rgba(0,0,0,0.12); padding:14px 16px;
+    display:flex; flex-direction:column; flex-wrap:nowrap; gap:0.5rem;
+  }
+  .st-key-nb2_chat_msgs { flex:1 1 auto; height:auto !important; min-height:0;
+    max-height:none !important; }
+  .st-key-nb2_chat [data-testid="stChatMessage"] { padding:0.5rem 0.6rem; }
+  .st-key-nb2_chat [data-testid="stChatMessage"] p { font-size:0.9rem; }
+  .nb2-chat-title { font-weight:700; font-size:1.05rem; color:#0d2137; }
+  .nb2-chat-sub { font-size:0.78rem; color:#7f8c8d; margin-top:-4px; }
+  @media (min-width: 1280px) {
+    [data-testid="stMainBlockContainer"] { padding-right: 450px !important; }
+  }
+</style>"""
+
+
+def _render_chat(
+    deps: Dict[str, Any], nid: int, title: str, coverage: str, md: str
+) -> None:
+    """Right-hand AI chat panel. The model sees the newsletter as currently edited."""
+    hist_key, q_key = _k(f"chat_{nid}"), _k(f"chat_q_{nid}")
+    history: List[Dict[str, str]] = st.session_state.setdefault(hist_key, [])
+    st.markdown(_CHAT_CSS, unsafe_allow_html=True)
+    with st.container(key="nb2_chat"):
+        h1, h2, h3 = st.columns([0.62, 0.22, 0.16], vertical_alignment="center")
+        h1.markdown(
+            "<div class='nb2-chat-title'>💬 Ask AI</div>"
+            "<div class='nb2-chat-sub'>Answers use this newsletter as context</div>",
+            unsafe_allow_html=True,
+        )
+        if h2.button("Clear", key=_k(f"chat_clear_{nid}_btn"), disabled=not history):
+            st.session_state[hist_key] = []
+            st.rerun()
+        h3.button(
+            "✕",
+            key=_k("chat_close_btn"),
+            on_click=_set_chat_open,
+            args=(False,),
+            help="Close",
+        )
+        msgs = st.container(height=480, key="nb2_chat_msgs", border=False)
+        with msgs:
+            if not history:
+                st.caption("Ask anything about this newsletter, or try:")
+                for i, s in enumerate(CHAT_STARTERS):
+                    st.button(
+                        s,
+                        key=_k(f"chat_start_{i}_btn"),
+                        on_click=_queue_question,
+                        args=(nid, s),
+                        use_container_width=True,
+                    )
+            for m in history:
+                with st.chat_message(m["role"]):
+                    st.markdown(m["content"])
+        typed = st.chat_input("Ask about this newsletter…", key=_k(f"chat_in_{nid}"))
+        question = typed or st.session_state.pop(q_key, None)
+        if question:
+            history.append({"role": "user", "content": question})
+            with msgs:
+                with st.chat_message("user"):
+                    st.markdown(question)
+                with st.chat_message("assistant"):
+                    try:
+                        answer = st.write_stream(
+                            _chat_stream(
+                                deps,
+                                chat_messages(
+                                    chat_system_prompt(title, coverage, md), history
+                                ),
+                            )
+                        )
+                    except Exception as exc:
+                        answer = f"⚠️ The AI request failed: {exc}"
+                        st.markdown(answer)
+            history.append({"role": "assistant", "content": str(answer or "")})
+            st.rerun()

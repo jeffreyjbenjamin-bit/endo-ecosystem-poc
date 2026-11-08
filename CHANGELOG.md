@@ -12,6 +12,16 @@ footer. Keep each version's changes in its own <ul> list. -->
 </thead>
 <tbody>
 
+<tr><td>2026-11-08</td><td>
+
+<b>v1.14.0</b>
+<ul>
+<li><b>💬 Ask AI</b> on the newsletter editing page opens a chat panel on the right. The AI answers questions using the newsletter being edited, including unsaved changes, and can suggest rewrites to paste in. Starter questions, Clear and close are included, and the conversation is kept while you edit.</li>
+<li>Fixed <b>Edit this newsletter</b> in the Home pop-up, which did not open the editor.</li>
+</ul>
+
+</td></tr>
+
 <tr><td>2026-11-07</td><td>
 
 <b>v1.13.0</b>

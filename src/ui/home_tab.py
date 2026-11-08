@@ -304,12 +304,11 @@ def _newsletter_dialog(nl: Dict[str, Any], open_editor: Callable) -> None:
         height=680,
         scrolling=True,
     )
-    st.button(
-        "✏️ Edit this newsletter",
-        key="home_nl_edit",
-        on_click=open_editor,
-        args=(nl["id"],),
-    )
+    # A button in a dialog reruns only the dialog; rerun the whole app so the
+    # page switches to the editor and the dialog closes.
+    if st.button("✏️ Edit this newsletter", key="home_nl_edit"):
+        open_editor(nl["id"])
+        st.rerun()
 
 
 @st.cache_data(ttl=6 * 3600, show_spinner=False)
