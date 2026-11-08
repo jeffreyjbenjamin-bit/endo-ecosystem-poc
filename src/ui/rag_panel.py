@@ -2422,6 +2422,15 @@ with tab_nl_config:
     except Exception as _users_exc:
         st.error(f"Users could not be loaded: {_users_exc}")
 
+    # ── AI models & usage ─────────────────────────────────────
+    st.markdown("---")
+    from src.ui.ai_settings import render_ai_usage as _render_ai_usage
+
+    try:
+        _render_ai_usage()
+    except Exception as _ai_exc:
+        st.error(f"AI usage could not be loaded: {_ai_exc}")
+
     st.markdown("---")
     st.markdown("### 📧 Email & Schedule")
 

@@ -14,6 +14,14 @@ footer. Keep each version's changes in its own <ul> list. -->
 
 <tr><td>2026-11-08</td><td>
 
+<b>v1.16.0</b>
+<ul>
+<li><b>Claude Sonnet 5.5</b> (Anthropic) now writes newsletters (Generate Newsletter) and powers the newsletter editor's <b>Ask AI</b> chat. Everything else stays on Azure OpenAI GPT-5.1.</li>
+<li>New shared AI service for Claude calls: server-side only, automatic retries for rate limits and temporary errors, clear error messages, and a fallback model when a request is declined.</li>
+<li>Every Claude call logs its input, output and cached tokens and an estimated cost; <b>Settings → AI models &amp; usage</b> shows which model each feature uses and the totals.</li>
+<li>Models are chosen with server settings (ANTHROPIC_MODEL, NEWSLETTER_AI_PROVIDER); without an Anthropic API key the newsletter features keep using GPT-5.1.</li>
+</ul>
+
 <b>v1.15.0</b>
 <ul>
 <li><b>Users</b>: a user list with types Admin, Physician, Payer, Patient and Researcher, started from the mailing list (everyone as Admin). Add, edit, deactivate and delete users, and import new mailing-list people, in Settings. Sign-in and permissions by type are not switched on yet.</li>

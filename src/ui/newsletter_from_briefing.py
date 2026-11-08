@@ -30,6 +30,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 import streamlit as st
 
+from src.services import ai_service as ai
 from src.ui.wysiwyg import tiptap_editor
 
 MAX_BASE_ARTICLES = 2
@@ -387,8 +388,19 @@ relates to the featured story.
 
 
 def _generate(
-    deps: Dict[str, Any], user_msg: str, system: str = _NB2_SYSTEM, max_tokens=4000
+    deps: Dict[str, Any],
+    user_msg: str,
+    system: str = _NB2_SYSTEM,
+    max_tokens=4000,
+    feature: Optional[str] = None,
 ) -> str:
+    """Run one prompt. Features moved to Claude (feature="newsletter") go through
+    the shared AI service; everything else stays on Azure OpenAI."""
+    if feature and ai.provider_for(feature) == "anthropic":
+        result = ai.generate(feature, system=system, prompt=user_msg)
+        if result.truncated:
+            return result.text + "\n\n_(Generation stopped at the length limit.)_"
+        return result.text
     deploy = deps["chat_deployment"]
     client = deps["make_chat_client"](deploy)
     messages = [
@@ -914,7 +926,9 @@ def render_tab(deps: Dict[str, Any]) -> None:
                     type="primary",
                     key=_k("gen_btn"),
                     use_container_width=True,
+                    help=f"Written by {ai.provider_status('newsletter')}",
                 )
+                st.caption(f"✨ Written by {ai.provider_status('newsletter')}")
             if gen:
                 _generate_and_open(deps, run, base, supporting, nl_title, nl_note)
 
@@ -1072,7 +1086,7 @@ def _generate_and_open(
     prompt = _build_prompt(base, supporting, nl_title, _run_label(run), nl_note)
     with st.spinner("Writing newsletter…"):
         try:
-            text = _generate(deps, prompt)
+            text = _generate(deps, prompt, feature="newsletter")
         except Exception as e:
             st.error(f"Generation failed: {e}")
             return
@@ -1700,7 +1714,7 @@ def _render_chat(
         h1.markdown(
             "<div class='nb2-chat-title'>💬 Ask AI</div>"
             "<div class='nb2-chat-sub'>Uses this newsletter and its sources · "
-            "can suggest edits</div>",
+            f"can suggest edits · {_esc(ai.provider_status('chat'))}</div>",
             unsafe_allow_html=True,
         )
         if h2.button("Clear", key=_k(f"chat_clear_{nid}_btn"), disabled=not history):
@@ -1740,9 +1754,15 @@ def _render_chat(
                     st.markdown(question)
                 with st.chat_message("assistant"):
                     try:
-                        answer = st.write_stream(
-                            _chat_stream(deps, chat_messages(system, history))
-                        )
+                        if ai.provider_for("chat") == "anthropic":
+                            stream = ai.stream_text(
+                                "chat",
+                                system=system,
+                                messages=chat_messages(system, history)[1:],
+                            )
+                        else:
+                            stream = _chat_stream(deps, chat_messages(system, history))
+                        answer = st.write_stream(stream)
                     except Exception as exc:
                         answer = f"⚠️ The AI request failed: {exc}"
                         st.markdown(answer)
