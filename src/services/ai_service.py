@@ -38,6 +38,7 @@ state directory (see usage_summary()).
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import random
@@ -266,6 +267,14 @@ def prices_for(model: str) -> Tuple[float, float, float, float]:
     return PRICES[DEFAULT_MODEL]
 
 
+def web_search_price() -> float:
+    """USD per web search (Anthropic list price $10 per 1,000 searches)."""
+    try:
+        return float(_env("ANTHROPIC_WEB_SEARCH_PRICE", "0.01"))
+    except ValueError:
+        return 0.01
+
+
 def estimate_cost(model: str, usage: Dict[str, int]) -> float:
     inp, out, cw, cr = prices_for(model)
     return (
@@ -273,7 +282,7 @@ def estimate_cost(model: str, usage: Dict[str, int]) -> float:
         + usage.get("output_tokens", 0) * out
         + usage.get("cache_write_tokens", 0) * cw
         + usage.get("cache_read_tokens", 0) * cr
-    ) / 1_000_000
+    ) / 1_000_000 + usage.get("web_searches", 0) * web_search_price()
 
 
 def _fallbacks_enabled(model: str) -> bool:
@@ -346,6 +355,12 @@ CREATE TABLE IF NOT EXISTS ai_usage (
 """
 
 
+def _migrate(conn: sqlite3.Connection) -> None:
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(ai_usage)")}
+    if "web_searches" not in cols:
+        conn.execute("ALTER TABLE ai_usage ADD COLUMN web_searches INTEGER DEFAULT 0")
+
+
 def _record(row: Dict[str, Any], db_path: Optional[str] = None) -> None:
     try:
         path = db_path or USAGE_DB
@@ -353,6 +368,7 @@ def _record(row: Dict[str, Any], db_path: Optional[str] = None) -> None:
         conn = sqlite3.connect(path)
         try:
             conn.executescript(_SCHEMA)
+            _migrate(conn)
             cols = list(row)
             conn.execute(
                 f"INSERT INTO ai_usage ({', '.join(cols)}) VALUES "
@@ -374,6 +390,10 @@ def _usage_dict(usage: Any) -> Dict[str, int]:
             getattr(usage, "cache_creation_input_tokens", 0) or 0
         ),
         "cache_read_tokens": int(getattr(usage, "cache_read_input_tokens", 0) or 0),
+        "web_searches": int(
+            getattr(getattr(usage, "server_tool_use", None), "web_search_requests", 0)
+            or 0
+        ),
     }
 
 
@@ -388,10 +408,11 @@ def usage_summary(
     conn = sqlite3.connect(path)
     try:
         conn.executescript(_SCHEMA)
+        _migrate(conn)
         rows = conn.execute(
             "SELECT feature, COALESCE(served_model, model), COUNT(*), "
             "SUM(status != 'ok'), SUM(input_tokens), SUM(output_tokens), "
-            "SUM(cache_write_tokens), SUM(cache_read_tokens), SUM(cost_usd) "
+            "SUM(cache_write_tokens), SUM(cache_read_tokens), SUM(cost_usd), SUM(COALESCE(web_searches, 0)) "
             "FROM ai_usage WHERE ts >= ? GROUP BY 1, 2 ORDER BY 1, 2",
             (since,),
         ).fetchall()
@@ -407,6 +428,7 @@ def usage_summary(
         "cache_write_tokens",
         "cache_read_tokens",
         "cost_usd",
+        "web_searches",
     ]
     return [dict(zip(keys, r)) for r in rows]
 
@@ -653,3 +675,208 @@ def stream_text(
                 _backoff(attempt)
                 continue
             raise err from exc
+
+
+# ── Tool use (search) ─────────────────────────────────────────────────────────
+
+# Anthropic-hosted web search. Runs on Anthropic's servers; results come back in
+# the same response. The organization must allow web search in the Console.
+WEB_SEARCH_TOOL = {"type": "web_search_20260209", "name": "web_search", "max_uses": 5}
+
+# A tool handler gets the tool's validated input and returns (result_text, is_error).
+ToolHandler = Any
+
+
+@dataclass
+class ToolEvent:
+    """Progress shown while Claude works: a search starting or its results."""
+
+    kind: str  # "web_search" | "web_results" | "tool" | "tool_result" | "note"
+    label: str
+
+
+def _web_results_event(block: Any) -> ToolEvent:
+    content = getattr(block, "content", None)
+    if isinstance(content, list):
+        return ToolEvent("web_results", f"{len(content)} web results")
+    code = getattr(content, "error_code", "") or "error"
+    return ToolEvent("web_results", f"web search unavailable ({code})")
+
+
+def _validated_input(block: Any, schema: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Check a client tool call's input against its schema (required + types)."""
+    data = getattr(block, "input", None)
+    if not isinstance(data, dict):
+        return None
+    types = {"string": str, "integer": int, "number": (int, float), "boolean": bool}
+    for name in schema.get("required", []):
+        if name not in data:
+            return None
+    for name, spec in (schema.get("properties") or {}).items():
+        if name in data and spec.get("type") in types:
+            if not isinstance(data[name], types[spec["type"]]):
+                return None
+    return data
+
+
+def _is_web_search_unavailable(err: AIServiceError) -> bool:
+    text = str(err).lower()
+    return (
+        err.kind in ("bad_request", "permission")
+        and "web" in text
+        and ("search" in text or "tool" in text)
+    )
+
+
+def stream_with_tools(
+    feature: str,
+    system: str,
+    messages: List[Dict[str, Any]],
+    tools: List[Dict[str, Any]],
+    handlers: Dict[str, ToolHandler],
+    max_tokens: Optional[int] = None,
+    max_turns: int = 8,
+):
+    """Chat with tools: yields answer text (str) and progress (ToolEvent).
+
+    Runs the tool loop on the server: client tools (in `handlers`) are run here
+    and their results sent back; server tools (web search) run at Anthropic, and
+    a paused long-running turn is resumed. Each turn is logged like any call.
+    Each turn's full response (including thinking blocks) is appended unchanged.
+    If web search is not enabled for the organization, the chat continues
+    without it. Raises AIServiceError.
+    """
+    msgs: List[Dict[str, Any]] = _messages_from(None, messages)
+    model, kwargs = _request(feature, system, msgs, max_tokens)
+    schemas = {
+        t["name"]: t.get("input_schema", {}) for t in tools if "input_schema" in t
+    }
+    kwargs["tools"] = [
+        # Client tools stream their input as generated (validated below).
+        {**t, "eager_input_streaming": True} if "input_schema" in t else t
+        for t in tools
+    ]
+    wrote_text = False
+    for turn in range(max_turns):
+        attempts = 1 + min(max_retries(), 2)
+        final = None
+        for attempt in range(attempts):
+            t0 = time.time()
+            started = False
+            try:
+                with _open_stream(kwargs) as stream:
+                    for event in stream:
+                        if event.type == "text":
+                            if not started and wrote_text:
+                                yield "\n\n"
+                            started = wrote_text = True
+                            yield event.text
+                        elif event.type == "content_block_stop":
+                            block = event.content_block
+                            btype = getattr(block, "type", "")
+                            if (
+                                btype == "server_tool_use"
+                                and block.name == "web_search"
+                            ):
+                                q = (getattr(block, "input", None) or {}).get(
+                                    "query", ""
+                                )
+                                yield ToolEvent("web_search", f"Searching the web: {q}")
+                            elif btype == "web_search_tool_result":
+                                yield _web_results_event(block)
+                            elif btype == "tool_use":
+                                q = (getattr(block, "input", None) or {}).get(
+                                    "query", ""
+                                )
+                                yield ToolEvent("tool", f"Searching the library: {q}")
+                    final = stream.get_final_message()
+                break
+            except ValueError as exc:
+                # Tool input JSON the SDK could not parse at all (eager streaming):
+                # no tool_use id to answer, so re-issue the turn.
+                if started or attempt == attempts - 1:
+                    raise AIServiceError(
+                        f"Claude sent an unreadable tool call: {exc}"
+                    ) from exc
+            except Exception as exc:
+                err = _translate(exc, model, max_retries())
+                if any(t.get("name") == "web_search" for t in kwargs["tools"]) and (
+                    _is_web_search_unavailable(err)
+                ):
+                    log.warning("feature=%s web search unavailable: %s", feature, err)
+                    kwargs["tools"] = [
+                        t for t in kwargs["tools"] if t.get("name") != "web_search"
+                    ]
+                    yield ToolEvent(
+                        "note",
+                        "Web search isn't enabled for this Anthropic organization, so only "
+                        "the library was searched. An admin can turn it on in the "
+                        "Anthropic Console (Settings → Privacy / web search).",
+                    )
+                    continue
+                if err.kind != "refusal":
+                    _record_failure(feature, model, t0, err)
+                if err.retryable and not started and attempt < attempts - 1:
+                    _backoff(attempt)
+                    continue
+                raise err from exc
+        if final is None:
+            raise AIServiceError("Claude request failed.", "unexpected")
+        result = _finish(feature, model, kwargs, final, t0)
+        stop = result.stop_reason
+        if stop == "refusal":
+            raise _refusal_error(final)
+        if stop == "pause_turn":
+            # Server-side search loop paused: send the turn back to resume it.
+            kwargs["messages"] = kwargs["messages"] + [
+                {"role": "assistant", "content": final.content}
+            ]
+            continue
+        if stop == "tool_use":
+            tool_results = []
+            for block in final.content:
+                if getattr(block, "type", "") != "tool_use":
+                    continue
+                handler = handlers.get(block.name)
+                data = _validated_input(block, schemas.get(block.name, {}))
+                if handler is None:
+                    content, is_error = f"Unknown tool: {block.name}", True
+                elif data is None:
+                    content = json.dumps(
+                        {"INVALID_INPUT": getattr(block, "input", None)}
+                    )
+                    is_error = True
+                else:
+                    try:
+                        content, is_error = handler(data)
+                    except Exception as exc:  # report tool failures to Claude
+                        log.warning("tool %s failed: %s", block.name, exc)
+                        content, is_error = f"The search failed: {exc}", True
+                    yield ToolEvent("tool_result", content_summary(content, is_error))
+                tool_results.append(
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": block.id,
+                        "content": content,
+                        "is_error": is_error,
+                    }
+                )
+            kwargs["messages"] = kwargs["messages"] + [
+                {"role": "assistant", "content": final.content},
+                {"role": "user", "content": tool_results},
+            ]
+            continue
+        if stop == "max_tokens":
+            yield "\n\n_(The answer was cut off at the length limit.)_"
+        return
+    yield "\n\n_(Stopped after several search steps. Ask again to continue.)_"
+
+
+def content_summary(content: str, is_error: bool) -> str:
+    if is_error:
+        return "Library search failed"
+    try:
+        n = len(json.loads(content).get("results", []))
+        return f"{n} library result{'s' if n != 1 else ''}"
+    except (ValueError, AttributeError, TypeError):
+        return "Library results"

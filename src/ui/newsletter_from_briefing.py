@@ -1408,6 +1408,22 @@ full texts.
 general knowledge as such. Never invent studies, numbers, trial names or quotes.
 - Be concise.
 
+Finding more articles (when the search tools are available):
+- When the user asks for more articles, sources, news, studies, trials or other \
+material to include, search before answering. Use search_library first (the app's \
+evidence library and past Intelligence Briefing results), then web_search for \
+recent items, especially from the last 90 days. Use a few focused queries rather \
+than one broad one.
+- Prefer peer-reviewed journals, trial registries, regulators and reputable news. \
+Label company press releases as company-reported.
+- Recommend only items the tools returned; never invent articles or URLs. Skip \
+items already in SOURCES.
+- For each recommendation give the title as a Markdown link, the source, the date, \
+and one sentence on why it fits and where it would go.
+- Then offer edit blocks that add the best ones: weave a sentence into the relevant \
+section with an inline Markdown link, or add or extend a "Further reading" section. \
+New articles get inline links, not new [N] numbers ([N] refers to SOURCES).
+
 Suggesting edits:
 Whenever the user asks for a change, or you recommend one, include each change as \
 an edit block that the app shows with an Apply button:
@@ -1436,11 +1452,148 @@ NEWSLETTER (Markdown, including any unsaved edits):
 >>>"""
 
 CHAT_STARTERS = [
+    "Find recent articles to add to this newsletter",
     "Summarize this newsletter in 3 bullets",
     "Suggest 3 better titles",
     "Check each claim against the sources",
     "Tighten the lead story to under 150 words",
 ]
+
+# Client tool: the app's own content. Web search is Anthropic's server tool
+# (ai.WEB_SEARCH_TOOL); both are offered when the chat runs on Claude.
+LIBRARY_TOOL = {
+    "name": "search_library",
+    "description": (
+        "Search Evidence Gap's own collection for articles to add to the newsletter: "
+        "the evidence library (PubMed, ClinicalTrials.gov, FDA, EMA, preprints, "
+        "OpenAlex and more; matched by meaning) and results from past Intelligence "
+        "Briefings (matched by keywords). Returns titles, sources, dates, URLs and "
+        "short summaries. Use focused queries such as a drug, biomarker, trial phase "
+        "or topic."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "query": {"type": "string", "description": "What to search for"},
+            "max_results": {
+                "type": "integer",
+                "description": "How many results to return (1-15, default 8)",
+            },
+        },
+        "required": ["query"],
+        "additionalProperties": False,
+    },
+}
+_QUERY_STOP = set(
+    "a an and are as at be by for from in into is it of on or the to with about "
+    "new recent latest article articles study studies news more".split()
+)
+
+
+def library_search(
+    query: str, deps: Dict[str, Any], max_results: int = 8
+) -> List[Dict[str, Any]]:
+    """Evidence library (semantic) + past briefing results (keywords), merged."""
+    k = max(1, min(int(max_results or 8), 15))
+    out: List[Dict[str, Any]] = []
+    seen: Set[str] = set()
+
+    def add(item: Dict[str, Any]) -> None:
+        key = _url_key(item.get("url", "")) or _norm_title(item.get("title", ""))
+        if key and key not in seen:
+            seen.add(key)
+            out.append(item)
+
+    # Evidence library, by meaning
+    try:
+        df = deps["load_docs_df"]()
+        uids, mat = deps["load_sqlite_vectors"]()
+        if getattr(mat, "size", 0):
+            by_uid = df.set_index("uid", drop=False)
+            vec = deps["embed_text"](query)
+            for uid, sim in deps["cosine_search"](vec, uids, mat, k):
+                if uid not in by_uid.index:
+                    continue
+                row = by_uid.loc[uid]
+                if isinstance(row, type(df)):
+                    row = row.iloc[0]
+                body = str(
+                    row.get("abstract", "")
+                    or row.get("summary", "")
+                    or row.get("description", "")
+                ).strip()
+                add(
+                    {
+                        "title": str(row.get("title", "")).strip(),
+                        "url": str(row.get("url", "") or ""),
+                        "source": str(row.get("source", "")),
+                        "date": str(row.get("published_date", "") or "")[:10],
+                        "summary": " ".join(body.split())[:400],
+                        "found_in": "evidence library",
+                        "relevance": round(float(sim), 3),
+                    }
+                )
+    except Exception as exc:  # the library is optional; briefings still search
+        out.append({"note": f"Evidence library search unavailable: {exc}"})
+
+    # Past Intelligence Briefing results, by keywords
+    terms = [
+        t
+        for t in re.findall(r"[a-z0-9]+", query.lower())
+        if len(t) > 2 and t not in _QUERY_STOP
+    ]
+    scored = []
+    if terms:
+        for run in deps["load_ai_runs"](50):
+            try:
+                srcs = json.loads(run.get("sources_json") or "[]")
+            except (TypeError, ValueError):
+                continue
+            for src in srcs:
+                text = f"{src.get('title', '')} {src.get('snippet', '')}".lower()
+                hits = sum(1 for t in terms if t in text)
+                if hits:
+                    scored.append((hits / len(terms), src))
+    scored.sort(
+        key=lambda x: (x[0], str(x[1].get("published_date") or "")), reverse=True
+    )
+    for score, src in scored[: k * 2]:
+        add(
+            {
+                "title": _clean_title(src.get("title", "")),
+                "url": src.get("url", ""),
+                "source": src.get("source_name", ""),
+                "date": str(src.get("published_date") or "")[:10],
+                "summary": " ".join(str(src.get("snippet") or "").split())[:400],
+                "found_in": "Intelligence Briefing results"
+                + (" (company press release)" if src.get("is_press_release") else ""),
+                "relevance": round(score, 3),
+            }
+        )
+    items = [i for i in out if "title" in i]
+    notes = [i["note"] for i in out if "note" in i]
+    lib = [i for i in items if i["found_in"] == "evidence library"][:k]
+    brief = [i for i in items if i["found_in"] != "evidence library"][:k]
+    return notes + lib + brief
+
+
+def _library_tool_handler(deps: Dict[str, Any]):
+    def handle(data: Dict[str, Any]):
+        results = library_search(data["query"], deps, data.get("max_results") or 8)
+        notes = [r for r in results if isinstance(r, str)]
+        items = [r for r in results if isinstance(r, dict)]
+        payload = {"query": data["query"], "results": items}
+        if notes:
+            payload["notes"] = notes
+        if not items:
+            payload["message"] = (
+                "No matches in the library. Try other terms or web_search."
+            )
+        return json.dumps(payload, ensure_ascii=False), False
+
+    return handle
+
+
 _CHAT_MAX_DOC_CHARS = 60_000
 _CHAT_MAX_SOURCE_CHARS = 1_200
 _CHAT_HISTORY_TURNS = 12
@@ -1643,6 +1796,8 @@ _CHAT_CSS = """<style>
   .st-key-nb2_chat [data-testid="stChatMessage"] p { font-size:0.9rem; }
   .nb2-chat-title { font-weight:700; font-size:1.05rem; color:#0d2137; }
   .nb2-chat-sub { font-size:0.78rem; color:#7f8c8d; margin-top:-4px; }
+  .nb2-activity { font-size:0.76rem; color:#566573; background:#eef3f9;
+    border-radius:6px; padding:5px 8px; margin-bottom:6px; line-height:1.5; }
   .nb2-edit { border:1px solid #dde4ef; border-radius:8px; background:#fff;
     padding:8px 10px; margin:6px 0 4px 0; font-size:0.82rem; }
   .nb2-edit .lbl { font-size:0.7rem; font-weight:700; text-transform:uppercase;
@@ -1673,11 +1828,50 @@ def _edit_card(n: int, e: Dict[str, str]) -> str:
     )
 
 
+def _activity_html(lines: List[str]) -> str:
+    """Search steps shown above an answer (🔎 searching…, results…)."""
+    return (
+        "<div class='nb2-activity'>"
+        + "".join(f"<div>{_esc(line)}</div>" for line in lines)
+        + "</div>"
+    )
+
+
+_ACTIVITY_ICONS = {
+    "web_search": "🌐",
+    "web_results": "↳",
+    "tool": "📚",
+    "tool_result": "↳",
+    "note": "⚠️",
+}
+
+
+def _stream_answer(placeholder, events) -> Tuple[str, List[str]]:
+    """Show streamed text and search steps live; return (text, activity lines)."""
+    text, activity = "", []
+    for ev in events:
+        if isinstance(ev, str):
+            text += ev
+        else:
+            activity.append(f"{_ACTIVITY_ICONS.get(ev.kind, '•')} {ev.label}")
+        with placeholder.container():
+            if activity:
+                st.markdown(_activity_html(activity), unsafe_allow_html=True)
+            st.markdown(text + " ▌" if text else "_Thinking…_")
+    with placeholder.container():
+        if activity:
+            st.markdown(_activity_html(activity), unsafe_allow_html=True)
+        st.markdown(text)
+    return text, activity
+
+
 def _render_message(nid: int, msg_i: int, m: Dict[str, Any]) -> None:
     with st.chat_message(m["role"]):
         if m["role"] != "assistant":
             st.markdown(m["content"])
             return
+        if m.get("activity"):
+            st.markdown(_activity_html(m["activity"]), unsafe_allow_html=True)
         text, _ = parse_edits(m["content"])
         st.markdown(text or "_(suggested edits below)_")
         edits = m.get("edits") or []
@@ -1714,7 +1908,12 @@ def _render_chat(
         h1.markdown(
             "<div class='nb2-chat-title'>💬 Ask AI</div>"
             "<div class='nb2-chat-sub'>Uses this newsletter and its sources · "
-            f"can suggest edits · {_esc(ai.provider_status('chat'))}</div>",
+            + (
+                "searches the web and library · "
+                if ai.provider_for("chat") == "anthropic"
+                else ""
+            )
+            + f"can suggest edits · {_esc(ai.provider_status('chat'))}</div>",
             unsafe_allow_html=True,
         )
         if h2.button("Clear", key=_k(f"chat_clear_{nid}_btn"), disabled=not history):
@@ -1753,20 +1952,35 @@ def _render_chat(
                 with st.chat_message("user"):
                     st.markdown(question)
                 with st.chat_message("assistant"):
+                    activity: List[str] = []
                     try:
                         if ai.provider_for("chat") == "anthropic":
-                            stream = ai.stream_text(
+                            # Claude with search: the evidence library + briefings
+                            # (run here) and Anthropic's web search (run there).
+                            events = ai.stream_with_tools(
                                 "chat",
                                 system=system,
                                 messages=chat_messages(system, history)[1:],
+                                tools=[LIBRARY_TOOL, ai.WEB_SEARCH_TOOL],
+                                handlers={
+                                    "search_library": _library_tool_handler(deps)
+                                },
                             )
+                            answer, activity = _stream_answer(st.empty(), events)
                         else:
                             stream = _chat_stream(deps, chat_messages(system, history))
-                        answer = st.write_stream(stream)
+                            answer = st.write_stream(stream)
                     except Exception as exc:
                         answer = f"⚠️ The AI request failed: {exc}"
                         st.markdown(answer)
             answer = str(answer or "")
             _, edits = parse_edits(answer)
-            history.append({"role": "assistant", "content": answer, "edits": edits})
+            history.append(
+                {
+                    "role": "assistant",
+                    "content": answer,
+                    "edits": edits,
+                    "activity": activity,
+                }
+            )
             st.rerun()

@@ -1,5 +1,6 @@
 """Shared AI service: config, cost, retries, errors, usage logging (no network)."""
 
+import json
 import sqlite3
 from types import SimpleNamespace
 
@@ -248,3 +249,171 @@ def test_trends_provider_and_structured_output(env):
     ai.generate("trends", system="S", prompt="p", json_schema=schema)
     oc = client.calls[0][1]["output_config"]
     assert oc == {"effort": "high", "format": {"type": "json_schema", "schema": schema}}
+
+
+# ── Tool use (search) ─────────────────────────────────────────────────────────
+
+
+class EventStream(FakeStream):
+    """A stream that yields events (text deltas and finished content blocks)."""
+
+    def __init__(self, final, events=None, error=None):
+        super().__init__(final, chunks=[], error=error)
+        self._events = events or []
+
+    def __iter__(self):
+        return iter(self._events)
+
+
+def _ev_text(t):
+    return SimpleNamespace(type="text", text=t)
+
+
+def _ev_block(block):
+    return SimpleNamespace(type="content_block_stop", content_block=block)
+
+
+def _tool_turn(tool_id="toolu_1", query="dienogest", stop="tool_use"):
+    block = SimpleNamespace(
+        type="tool_use", id=tool_id, name="search_library", input={"query": query}
+    )
+    final = _final(text="", stop=stop)
+    final.content = [SimpleNamespace(type="thinking", thinking=""), block]
+    return final, block
+
+
+def test_tool_loop_runs_library_tool_and_web_search(env):
+    final1, block = _tool_turn()
+    ws = SimpleNamespace(
+        type="server_tool_use", name="web_search", input={"query": "endometriosis 2026"}
+    )
+    wsr = SimpleNamespace(type="web_search_tool_result", content=[1, 2, 3])
+    final2 = _final(text="Here are 2 articles", web_searches=0)
+    final2.usage.server_tool_use = SimpleNamespace(web_search_requests=1)
+    client = FakeClient(
+        EventStream(final1, [_ev_block(block)]),
+        EventStream(
+            final2,
+            [
+                _ev_block(ws),
+                _ev_block(wsr),
+                _ev_text("Here are "),
+                _ev_text("2 articles"),
+            ],
+        ),
+    )
+    _use(env, client)
+    calls = []
+
+    def handler(data):
+        calls.append(data)
+        return json.dumps({"results": [{"title": "A"}, {"title": "B"}]}), False
+
+    out = list(
+        ai.stream_with_tools(
+            "chat",
+            system="S",
+            messages=[{"role": "user", "content": "find more"}],
+            tools=[
+                {
+                    "name": "search_library",
+                    "input_schema": {
+                        "type": "object",
+                        "properties": {"query": {"type": "string"}},
+                        "required": ["query"],
+                    },
+                },
+                ai.WEB_SEARCH_TOOL,
+            ],
+            handlers={"search_library": handler},
+        )
+    )
+    text = "".join(o for o in out if isinstance(o, str))
+    labels = [o.label for o in out if not isinstance(o, str)]
+    assert text == "Here are 2 articles"
+    assert calls == [{"query": "dienogest"}]
+    assert labels == [
+        "Searching the library: dienogest",
+        "2 library results",
+        "Searching the web: endometriosis 2026",
+        "3 web results",
+    ]
+    # second request carries the full first turn plus the tool result
+    msgs = client.calls[1][1]["messages"]
+    assert msgs[-2]["role"] == "assistant" and msgs[-2]["content"] is final1.content
+    assert msgs[-1]["content"][0]["tool_use_id"] == "toolu_1"
+    # client tools stream their input; the server tool is left as declared
+    tools = client.calls[0][1]["tools"]
+    assert (
+        tools[0]["eager_input_streaming"] is True
+        and "eager_input_streaming" not in tools[1]
+    )
+    # web search counted in cost
+    rows = (
+        sqlite3.connect(ai.USAGE_DB)
+        .execute("SELECT web_searches FROM ai_usage ORDER BY id")
+        .fetchall()
+    )
+    assert rows[-1] == (1,)
+
+
+def test_invalid_tool_input_is_reported_not_run(env):
+    final1, block = _tool_turn()
+    block.input = {"q": "wrong field"}
+    client = FakeClient(
+        EventStream(final1, [_ev_block(block)]),
+        EventStream(_final(text="ok"), [_ev_text("ok")]),
+    )
+    _use(env, client)
+    ran = []
+    list(
+        ai.stream_with_tools(
+            "chat",
+            "S",
+            [{"role": "user", "content": "q"}],
+            tools=[
+                {
+                    "name": "search_library",
+                    "input_schema": {
+                        "type": "object",
+                        "properties": {"query": {"type": "string"}},
+                        "required": ["query"],
+                    },
+                }
+            ],
+            handlers={"search_library": lambda d: ran.append(d) or ("x", False)},
+        )
+    )
+    assert ran == []
+    result = client.calls[1][1]["messages"][-1]["content"][0]
+    assert result["is_error"] is True and "INVALID_INPUT" in result["content"]
+
+
+def test_pause_turn_resumes_and_web_search_can_be_unavailable(env):
+    paused = _final(text="", stop="pause_turn")
+    client = FakeClient(
+        EventStream(_final(), error=_http_error(anthropic.BadRequestError, 400)),
+        EventStream(paused, []),
+        EventStream(_final(text="done"), [_ev_text("done")]),
+    )
+    # the 400 message must mention web search to trigger the fallback
+    client.queue[0]._error = anthropic.BadRequestError(
+        "web_search tool is not enabled for this organization",
+        response=httpx2.Response(400, request=httpx2.Request("POST", "https://x")),
+        body=None,
+    )
+    _use(env, client)
+    out = list(
+        ai.stream_with_tools(
+            "chat",
+            "S",
+            [{"role": "user", "content": "q"}],
+            tools=[ai.WEB_SEARCH_TOOL],
+            handlers={},
+        )
+    )
+    notes = [o.label for o in out if not isinstance(o, str)]
+    assert "Web search isn't enabled" in notes[0]
+    assert "".join(o for o in out if isinstance(o, str)) == "done"
+    assert all(not c[1]["tools"] for c in client.calls[1:])  # retried without it
+    assert client.calls[2][1]["messages"][-1]["content"] is paused.content

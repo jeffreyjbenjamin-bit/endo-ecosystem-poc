@@ -62,6 +62,7 @@ def render_ai_usage() -> None:
             "cache_read_tokens": st.column_config.NumberColumn(
                 "Cache read", format="localized"
             ),
+            "web_searches": st.column_config.NumberColumn("Web searches"),
             "cost_usd": st.column_config.NumberColumn("Est. cost", format="$%.4f"),
         },
     )

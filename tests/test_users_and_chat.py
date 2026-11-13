@@ -136,3 +136,65 @@ def test_parse_and_apply_suggested_edits():
     doc3 = apply_edit(doc2, edits[1]["find"], edits[1]["replace"])
     assert doc3.rstrip().endswith("[1].")
     assert apply_edit(doc, "Not in the document", "x") is None
+
+
+def test_library_search_merges_library_and_briefings():
+    import numpy as np
+    import pandas as pd
+
+    from src.ui.newsletter_from_briefing import library_search
+
+    df = pd.DataFrame(
+        [
+            {
+                "uid": "u1",
+                "title": "Dienogest trial",
+                "url": "https://pubmed/1",
+                "source": "pubmed",
+                "published_date": "2026-05-01",
+                "abstract": "Long text " * 5,
+            },
+        ]
+    )
+    runs = [
+        {
+            "sources_json": json.dumps(
+                [
+                    {
+                        "title": "Dienogest vs GnRH",
+                        "url": "https://news/2",
+                        "source_name": "news",
+                        "snippet": "dienogest comparison",
+                        "published_date": "2026-10-01",
+                    },
+                    {
+                        "title": "Dienogest trial",
+                        "url": "https://pubmed/1/",
+                        "snippet": "dup",
+                    },
+                    {"title": "Unrelated", "url": "https://x/3", "snippet": "nothing"},
+                ]
+            )
+        }
+    ]
+    deps = {
+        "load_docs_df": lambda: df,
+        "load_sqlite_vectors": lambda: (["u1"], np.ones((1, 3))),
+        "embed_text": lambda q: np.ones(3),
+        "cosine_search": lambda vec, uids, mat, k: [("u1", 0.91)],
+        "load_ai_runs": lambda n: runs,
+    }
+    res = library_search("new dienogest studies", deps, 5)
+    titles = [(r["title"], r["found_in"]) for r in res]
+    assert titles == [
+        ("Dienogest trial", "evidence library"),
+        ("Dienogest vs GnRH", "Intelligence Briefing results"),
+    ]
+    assert len(res[0]["summary"]) <= 400
+
+    # library unavailable: briefings still searched, with a note
+    deps["load_sqlite_vectors"] = lambda: (_ for _ in ()).throw(
+        RuntimeError("no vectors")
+    )
+    res = library_search("dienogest", deps, 5)
+    assert isinstance(res[0], str) and "unavailable" in res[0]

@@ -12,6 +12,18 @@ footer. Keep each version's changes in its own <ul> list. -->
 </thead>
 <tbody>
 
+<tr><td>2026-11-12</td><td>
+
+<b>v1.18.0</b>
+<ul>
+<li><b>Ask AI can search for more articles</b> on the newsletter editing page: Claude searches the app's evidence library and past Intelligence Briefing results, and the live web, then recommends articles (title link, source, date, why it fits) with edits you can apply to add them.</li>
+<li>Search steps are shown as they happen (searching the library or web, and how many results).</li>
+<li>New starter question: "Find recent articles to add to this newsletter".</li>
+<li>Web searches are counted and priced in Settings → AI models &amp; usage. If web search isn't enabled for the Anthropic organization, the chat searches the library only and says so.</li>
+</ul>
+
+</td></tr>
+
 <tr><td>2026-11-08</td><td>
 
 <b>v1.17.0</b>
