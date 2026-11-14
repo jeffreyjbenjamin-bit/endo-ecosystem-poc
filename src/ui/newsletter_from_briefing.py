@@ -30,6 +30,12 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 import streamlit as st
 
+from src.common.citations import (
+    citation_from_library,
+    citations_for,
+    format_citation,
+    host,
+)
 from src.common.email_briefing import newsletter_subject
 from src.common.voice_guide import VOICE_GUIDE, VOICE_GUIDE_SHORT, dash_count
 from src.services import ai_service as ai
@@ -248,6 +254,7 @@ def _library_search(
                     "snippet": body[:1200],
                     "score": float(sim),
                     "matched": [b["ref"]],
+                    "citation": citation_from_library(row.to_dict()),
                 }
             else:
                 hit["score"] = max(hit["score"], float(sim))
@@ -318,11 +325,13 @@ def _web_search(
 
 
 def _article_block(n: int, a: Dict[str, Any]) -> str:
+    cite = citation_text(a)
     return (
         f"[{n}] {a['title']}\n"
         f"    Source: {a.get('source') or 'unknown'} | Date: "
         f"{a.get('published_date') or 'unknown'}\n"
-        f"    URL: {a['url']}\n"
+        + (f"    Citation: {cite}\n" if cite else "")
+        + f"    URL: {a['url']}\n"
         f"    Summary: {(a.get('snippet') or '(no summary available)')[:1200]}"
     )
 
@@ -401,7 +410,7 @@ implication or action, never a summary. Cite with [N].]
 ---
 
 ## Sources
-[Every article cited inline: [N] Title. Source. Date. URL]
+[Every article cited inline: [N] Authors. Title. Journal or publisher. Year. DOI or URL. Use the Citation line when one is given.]
 """
 
 
@@ -565,9 +574,46 @@ def _card_html(a: Dict[str, Any], right_label: str, extra_html: str = "") -> str
         f'<span class="endo-quality">{right_label}</span></div>'
         f'<div class="endo-title">{title_html}</div>'
         f'<div class="endo-meta">{meta}</div>'
+        f"{_citation_html(a)}"
         f"{extra_html}"
         f'<div class="endo-excerpt nb2-excerpt">{excerpt}</div>'
     )
+
+
+def citation_text(a: Dict[str, Any]) -> str:
+    """Full source citation for an article ("" when there is nothing to add)."""
+    if "citation" not in a:
+        return ""
+    return format_citation(a.get("citation"), host(a.get("url", "")))
+
+
+def _citation_html(a: Dict[str, Any]) -> str:
+    text = citation_text(a)
+    if not text:
+        return ""
+    html = _esc(text)
+    doi = (a.get("citation") or {}).get("doi")
+    if doi:
+        html = html.replace(
+            _esc(f"doi:{doi}"),
+            f'<a href="https://doi.org/{_esc(doi)}" target="_blank" '
+            f'rel="noopener">doi:{_esc(doi)}</a>',
+        )
+    return f'<div class="nb2-cite">\U0001f4d6 {html}</div>'
+
+
+def _add_web_citations(results: List[Dict[str, Any]]) -> None:
+    """Publication details for web results (read from the article pages; cached)."""
+    web = [r for r in results if r.get("origin") == "web" and r.get("url")]
+    if not web:
+        return
+    with st.spinner("Looking up where each article was published…"):
+        try:
+            found = citations_for([r["url"] for r in web])
+        except Exception:
+            found = {}
+    for r in web:
+        r["citation"] = found.get(r["url"])
 
 
 def _css(flyout_open: bool, selected_keys: List[str]) -> str:
@@ -592,6 +638,10 @@ def _css(flyout_open: bool, selected_keys: List[str]) -> str:
       }}
       [class*="st-key-nb2_tile_"]:hover {{ box-shadow:0 4px 16px rgba(0,0,0,0.10); }}
       .nb2-excerpt {{ -webkit-line-clamp:3 !important; margin-bottom:4px !important; }}
+      .nb2-cite {{ font-size:0.8rem; color:#3a332c; background:#fbf8f1;
+        border-left:3px solid #c99a2e; border-radius:4px; padding:5px 9px;
+        margin:4px 0 6px 0; line-height:1.4; }}
+      .nb2-cite a {{ color:#a8243c; }}
       .nb2-reason {{ font-size:0.84rem; color:#141210; background:#f8f0dc;
         border-left:3px solid #a8243c; border-radius:4px; padding:6px 9px; margin:6px 0 8px 0; }}
       .st-key-nb2_flyout {{
@@ -648,6 +698,7 @@ def _run_search(
                 errors += [f"Web: {x}" for x in werrs]
             except Exception as e:
                 errors.append(f"Web: {e}")
+    _add_web_citations(results)
     if results:
         with st.spinner(f"Explaining how {len(results)} articles are related…"):
             _explain_matches(deps, base, results)
@@ -812,7 +863,9 @@ def render_tab(deps: Dict[str, Any]) -> None:
         st.session_state[_k("results_sig")] = None
         st.session_state[_k("flyout_open")] = False
 
-    articles = _briefing_articles(run)
+    topic = st.session_state.get(_k("topic")) or ""
+    topic_results = st.session_state.get(_k("topic_results")) or []
+    articles = topic_results if topic else _briefing_articles(run)
     base_key = lambda a: _k(f"base_{a['key']}")  # noqa: E731
     trial_arts = _newsletter_trial_articles()
     base = [a for a in articles + trial_arts if st.session_state.get(base_key(a))]
@@ -873,6 +926,8 @@ def render_tab(deps: Dict[str, Any]) -> None:
                 use_container_width=True,
             )
 
+    _render_topic_bar(deps, topic, len(topic_results))
+
     if find and base:
         _run_search(
             base,
@@ -891,7 +946,11 @@ def render_tab(deps: Dict[str, Any]) -> None:
     st.markdown(_css(flyout_open, [a["key"] for a in base]), unsafe_allow_html=True)
 
     if not articles:
-        st.warning("This briefing has no stored articles.")
+        st.warning(
+            f"No articles found for \u201c{topic}\u201d. Try other words."
+            if topic
+            else "This briefing has no stored articles."
+        )
         return
 
     # ── Build panel (top): featured, supporting, title, Generate ──
@@ -957,11 +1016,18 @@ def render_tab(deps: Dict[str, Any]) -> None:
     with c1:
         st.caption(
             f"**Choose up to {MAX_BASE_ARTICLES} articles to feature** · {n_base} selected · "
-            f"{sum(a['cited'] for a in articles)} of {len(articles)} cited in the briefing text"
+            + (
+                f"{len(articles)} articles for \u201c{_esc(topic)}\u201d"
+                if topic
+                else f"{sum(a['cited'] for a in articles)} of {len(articles)} cited "
+                "in the briefing text"
+            )
         )
     with c2:
-        only_cited = st.toggle(
-            "Only articles cited in the briefing", key=_k("only_cited")
+        only_cited = (
+            False
+            if topic
+            else st.toggle("Only articles cited in the briefing", key=_k("only_cited"))
         )
     with c3:
         with st.popover("View briefing text", use_container_width=True):
@@ -979,7 +1045,13 @@ def render_tab(deps: Dict[str, Any]) -> None:
             checked = bool(st.session_state.get(base_key(a)))
             right_label = f"[{a['ref']}]" + (" · Cited" if a["cited"] else "")
             if a.get("score") is not None:
-                right_label += f" · Score {a['score']:.0%}"
+                right_label += (
+                    f" · Match {a['score']:.0%}"
+                    if topic
+                    else f" · Score {a['score']:.0%}"
+                )
+            elif a.get("rank"):
+                right_label += f" · Web #{a['rank']}"
             with col:
                 with st.container(key=f"nb2_tile_{a['key']}"):
                     st.markdown(_card_html(a, right_label), unsafe_allow_html=True)
@@ -991,6 +1063,173 @@ def render_tab(deps: Dict[str, Any]) -> None:
 
     if flyout_open:
         _render_flyout(base, sig)
+
+
+def topic_search(
+    topic: str, deps: Dict[str, Any], where: str, web_days: int, k: int = 12
+) -> Tuple[List[Dict[str, Any]], List[str]]:
+    """Articles for a free-text topic: evidence library (by meaning) and the web.
+
+    Returns (articles in the same shape as briefing articles, errors).
+    """
+    q = topic.strip()
+    if "endometrio" not in q.lower():
+        q += " endometriosis"
+    out: List[Dict[str, Any]] = []
+    errors: List[str] = []
+    seen: Set[str] = set()
+
+    def add(item: Dict[str, Any]) -> None:
+        key = _url_key(item["url"]) or _norm_title(item["title"])
+        if key and key not in seen:
+            seen.add(key)
+            out.append(item)
+
+    if where in ("Evidence library + Web", "Evidence library"):
+        try:
+            df = deps["load_docs_df"]()
+            uids, mat = deps["load_sqlite_vectors"]()
+            if getattr(mat, "size", 0):
+                by_uid = df.set_index("uid", drop=False)
+                for uid, sim in deps["cosine_search"](
+                    deps["embed_text"](q), uids, mat, k
+                ):
+                    if uid not in by_uid.index:
+                        continue
+                    row = by_uid.loc[uid]
+                    if isinstance(row, type(df)):
+                        row = row.iloc[0]
+                    url = str(row.get("url", "") or "")
+                    body = str(
+                        row.get("abstract", "")
+                        or row.get("summary", "")
+                        or row.get("description", "")
+                    ).strip()
+                    add(
+                        {
+                            "key": f"topic_lib_{_hash(uid)}",
+                            "origin": "library",
+                            "title": str(row.get("title", "")).strip() or url,
+                            "url": url,
+                            "source": str(row.get("source", "")),
+                            "published_date": str(row.get("published_date", "") or "")[
+                                :10
+                            ],
+                            "snippet": body[:1200],
+                            "score": float(sim),
+                            "cited": False,
+                            "citation": citation_from_library(row.to_dict()),
+                        }
+                    )
+        except Exception as e:
+            errors.append(f"Evidence library: {e}")
+    if where in ("Evidence library + Web", "Web"):
+        try:
+            from src.connectors.search_provider import get_provider
+            from src.pipelines.ai_search import (
+                deduplicate_results,
+                is_press_release,
+                normalize_results,
+                run_search_provider,
+            )
+
+            provider = get_provider()
+            if not provider.available():
+                errors.append(
+                    f"Web: search provider '{provider.name}' is not configured."
+                )
+            else:
+                raw, errs = run_search_provider(
+                    [q], provider, num_per_query=10, date_range_days=web_days
+                )
+                errors += [f"Web: {x}" for x in errs]
+                for rank, r in enumerate(deduplicate_results(normalize_results(raw))):
+                    add(
+                        {
+                            "key": f"topic_web_{_hash(_url_key(r['url']))}",
+                            "origin": "web",
+                            "title": _clean_title(r["title"]) or r["url"],
+                            "url": r["url"],
+                            "source": r.get("source_name", ""),
+                            "published_date": (r.get("published_date") or "")[:10],
+                            "snippet": r.get("snippet", ""),
+                            "score": None,
+                            "rank": rank + 1,
+                            "cited": False,
+                            "is_press_release": is_press_release(r),
+                        }
+                    )
+        except Exception as e:
+            errors.append(f"Web: {e}")
+    for n, a in enumerate(out, start=1):
+        a["ref"] = n
+    return out, errors
+
+
+def _run_topic_search(deps: Dict[str, Any]) -> None:
+    topic = (st.session_state.get(_k("topic_input")) or "").strip()
+    if not topic:
+        return
+    with st.spinner(f"Searching for \u201c{topic}\u201d…"):
+        results, errors = topic_search(
+            topic,
+            deps,
+            st.session_state.get(_k("where"), "Evidence library + Web"),
+            int(st.session_state.get(_k("web_days"), 365)),
+        )
+    _add_web_citations(results)
+    st.session_state[_k("topic")] = topic
+    st.session_state[_k("topic_results")] = results
+    st.session_state[_k("topic_errors")] = errors
+    # New article list: clear the similar-article results
+    st.session_state[_k("results")] = []
+    st.session_state[_k("results_sig")] = None
+    st.session_state[_k("flyout_open")] = False
+
+
+def _clear_topic() -> None:
+    for k in ("topic", "topic_results", "topic_errors"):
+        st.session_state.pop(_k(k), None)
+    st.session_state[_k("topic_input")] = ""
+    st.session_state[_k("results")] = []
+    st.session_state[_k("results_sig")] = None
+    st.session_state[_k("flyout_open")] = False
+
+
+def _render_topic_bar(deps: Dict[str, Any], topic: str, n: int) -> None:
+    """Search a different topic: replaces the briefing's articles with matches."""
+    with st.form(_k("topic_form"), border=False, enter_to_submit=True):
+        c1, c2, c3 = st.columns([3.2, 1.0, 1.25], vertical_alignment="bottom")
+        c1.text_input(
+            "Search a different topic",
+            key=_k("topic_input"),
+            placeholder="e.g. adenomyosis imaging, non-hormonal pain treatment, "
+            "adolescent diagnosis",
+            help="Finds articles in the evidence library and on the web (as set in "
+            "\u2699\ufe0f Search options) and shows them below instead of the "
+            "briefing's articles.",
+        )
+        c2.form_submit_button(
+            "\U0001f50e Search topic",
+            type="primary",
+            use_container_width=True,
+            on_click=_run_topic_search,
+            args=(deps,),
+        )
+        if topic:
+            c3.form_submit_button(
+                "\u21a9 Briefing articles",
+                use_container_width=True,
+                on_click=_clear_topic,
+                help="Show the selected Intelligence Briefing's articles again",
+            )
+    if topic:
+        st.info(
+            f"Showing {n} articles for \u201c{topic}\u201d instead of the "
+            "Intelligence Briefing's articles."
+        )
+        for e in st.session_state.get(_k("topic_errors")) or []:
+            st.caption(f"\u26a0\ufe0f {e}")
 
 
 def _trial_article(t: Dict[str, Any]) -> Dict[str, Any]:
@@ -1101,7 +1340,9 @@ def _generate_and_open(
     nl_note: str,
 ) -> None:
     """Write the newsletter, save it, and switch to the editing page."""
-    prompt = _build_prompt(base, supporting, nl_title, _run_label(run), nl_note)
+    topic = st.session_state.get(_k("topic")) or ""
+    label = f"Topic search: {topic}" if topic else _run_label(run)
+    prompt = _build_prompt(base, supporting, nl_title, label, nl_note)
     with st.spinner("Writing newsletter…"):
         try:
             text = _generate(deps, prompt, feature="newsletter")
@@ -1121,12 +1362,17 @@ def _generate_and_open(
             "published_date": a.get("published_date", ""),
             "reason": a.get("reason", ""),
             "snippet": (a.get("snippet") or "")[:1500],
+            "citation": citation_text(a),
         }
         for i, a in enumerate(base + supporting)
     ]
     sid = deps["save_newsletter"](
         title=nl_title,
-        coverage_period=f"Seeded from Intelligence Briefing #{run['id']}",
+        coverage_period=(
+            f"Topic search: {topic}"
+            if topic
+            else f"Seeded from Intelligence Briefing #{run['id']}"
+        ),
         content_md=text,
         sources=sources,
         config={
@@ -1134,6 +1380,7 @@ def _generate_and_open(
             "briefing_run_id": run["id"],
             "featured_refs": [b["ref"] for b in base],
             "editorial_note": nl_note,
+            "topic": topic,
         },
     )
     st.session_state[_k("flyout_open")] = False
@@ -1149,7 +1396,15 @@ def _generate_and_open(
 _VIEW_PARAM = "view"
 _EDITOR_VIEW = "newsletter"
 # Buttons (and similar) can't have their state assigned, so preserve_state skips them
-_BUTTON_KEYS = ("_btn", "_flyout", "nb2_rm_", "nb2_ed_", "nb2_tt_", "nb2_chat_in_")
+_BUTTON_KEYS = (
+    "_btn",
+    "_flyout",
+    "nb2_rm_",
+    "nb2_ed_",
+    "nb2_tt_",
+    "nb2_chat_in_",
+    "_form",
+)
 
 
 def preserve_state() -> None:

@@ -14,6 +14,13 @@ footer. Keep each version's changes in its own <ul> list. -->
 
 <tr><td>2026-11-14</td><td>
 
+<b>v1.21.0</b>
+<ul>
+<li>Build Newsletter from Intel Briefing: <b>Search a different topic</b>. Enter a topic and search to replace the briefing's articles with matching articles from the evidence library and the web; <b>Briefing articles</b> switches back. Newsletters built this way record the topic they came from.</li>
+<li>Find Similar Articles now shows a full <b>source citation</b> for each article: authors, journal or publisher, year, DOI link, and where it is indexed (PubMed, Crossref, ClinicalTrials.gov and others). Web results are looked up from the article page or PubMed; sites that block lookups show the publisher's name.</li>
+<li>Generated newsletters list sources with these fuller citations.</li>
+</ul>
+
 <b>v1.20.0</b>
 <ul>
 <li>Newsletter generation follows the <b>Evidence Gap voice guide</b> (November 14, 2026): written for experienced professionals, thesis by the second paragraph, headers as claims, evidence matched to its strength with the gap named, no hype or hedge-stacking, "we" for company voice, ending on an implication or action, and zero em dashes.</li>
