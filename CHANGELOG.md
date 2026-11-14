@@ -12,6 +12,16 @@ footer. Keep each version's changes in its own <ul> list. -->
 </thead>
 <tbody>
 
+<tr><td>2026-11-14</td><td>
+
+<b>v1.18.1</b>
+<ul>
+<li>Ask AI (newsletter editor) now answers in a warmer, friendlier, more conversational tone: it notes what already works, offers suggestions as options, and suggests a helpful next step, while staying accurate and to the point.</li>
+<li>Friendlier welcome message when the Ask AI panel opens.</li>
+</ul>
+
+</td></tr>
+
 <tr><td>2026-11-12</td><td>
 
 <b>v1.18.0</b>
