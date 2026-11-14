@@ -14,6 +14,15 @@ footer. Keep each version's changes in its own <ul> list. -->
 
 <tr><td>2026-11-14</td><td>
 
+<b>v1.20.0</b>
+<ul>
+<li>Newsletter generation follows the <b>Evidence Gap voice guide</b> (November 14, 2026): written for experienced professionals, thesis by the second paragraph, headers as claims, evidence matched to its strength with the gap named, no hype or hedge-stacking, "we" for company voice, ending on an implication or action, and zero em dashes.</li>
+<li>Ask AI's suggested edits follow the same voice rules.</li>
+<li>Voice check in the newsletter editor: warns when the text has em dashes, en dashes or spaced hyphens, with a <b>Fix with Ask AI</b> button. Newsletter email subjects use a colon instead of a dash.</li>
+<li>New <b>brand colors</b> across the site, the Intelligence Briefing and Endometriosis News, taken from the brand reference artwork: ink black, ivory and cream backgrounds, crimson for buttons and links, gold accents. Headings use a serif font to match the logo.</li>
+<li>Home charts use brand colors (crimson, gold, plum; crimson heatmap), checked for color-blind readability.</li>
+</ul>
+
 <b>v1.19.0</b>
 <ul>
 <li>The newsletter is now <b>Endometriosis News</b> everywhere it is named: default title, masthead, email subject and header, previews, Home and the daily send.</li>

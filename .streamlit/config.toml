@@ -1,0 +1,11 @@
+# Evidence Gap brand theme (colors from the brand reference painting:
+# ink black, ivory, cream, crimson and gold).
+[theme]
+base = "light"
+primaryColor = "#a8243c"            # crimson: buttons, active tabs, toggles
+backgroundColor = "#faf8f3"         # ivory page
+secondaryBackgroundColor = "#f3eee4" # cream panels, inputs
+textColor = "#141210"               # ink
+linkColor = "#a8243c"
+borderColor = "#e6dfd0"
+headingFont = "serif"               # pairs with the logo's serif wordmark

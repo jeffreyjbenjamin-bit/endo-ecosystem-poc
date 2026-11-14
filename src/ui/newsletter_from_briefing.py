@@ -31,46 +31,53 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 import streamlit as st
 
 from src.common.email_briefing import newsletter_subject
+from src.common.voice_guide import VOICE_GUIDE, VOICE_GUIDE_SHORT, dash_count
 from src.services import ai_service as ai
 from src.ui.wysiwyg import tiptap_editor
 
 MAX_BASE_ARTICLES = 2
 _SS = "nb2_"  # session-state key prefix for this tab
 
-_NB2_SYSTEM = """\
-You are the editor of Endometriosis News, a newsletter for life sciences \
-professionals focused on endometriosis, published by Evidence Gap ("Making sense of \
-what's missing"). You write each issue as one coherent story, not a digest.
+_NB2_SYSTEM = (
+    """\
+You are the editor of Endometriosis News, the Evidence Gap newsletter on \
+endometriosis ("Making sense of what's missing"). You write each issue as one \
+argued story, not a digest, in the Evidence Gap voice below.
 
 Your output must be clean, publication-ready Markdown that follows the structure in \
 the user message exactly.
 
-STORYTELLING:
-- Decide what the issue is trying to tell readers: one clear thesis, the single \
-idea a reader should come away with. Build the whole issue around it.
-- Open with an introduction that sets the theme, explains why it matters now, and \
-states the thesis inside the narrative. Never label it ("Thesis:", "In this \
-issue", "Executive summary") or put it in a call-out box.
-- Let each section move the story forward, with transitions that connect one \
-section to the next. Use the featured articles as the heart of the story and the \
-supporting articles as evidence, contrast or context woven into the prose, not as \
-a separate list.
-- Close by returning to the thesis: what it means for clinicians, researchers and \
-patients, what is still missing, and what to watch next.
+STORY:
+- Decide which reader the issue serves most and what it should change in what \
+readers think or do. That is the thesis. Build the whole issue around it.
+- Open with the point. The thesis is stated inside the narrative by the second \
+paragraph, never labelled ("Thesis:", "In this issue", "Executive summary") or put \
+in a call-out box.
+- Each section advances the argument under a header that states a claim, with a \
+transition from the section before. The featured articles are the heart of the \
+story; supporting articles are evidence, contrast or context woven into the prose.
+- Close on an implication or action for the reader, including what is still \
+missing from the evidence. Never close with a summary.
 
-EDITORIAL RULES:
-- Write in confident, precise, engaging third-person editorial prose for an \
-informed professional reader.
-- Every factual claim must cite at least one source using [N] inline, where N is the \
+EVIDENCE RULES (these limit what you may claim):
+- Every factual claim cites at least one source using [N] inline, where N is the \
 article number given in the user message.
 - Only use facts present in the provided article titles, summaries, and metadata. \
-If a summary is thin, say less rather than inventing detail.
-- Do not invent new findings, numbers, trial names, or quotes.
+If a summary is thin, say less rather than inventing detail. Do not invent \
+findings, numbers, trial names, quotes or patients.
+- The human anchor must come from the sources or be a clearly general case \
+("a patient waiting years for a diagnosis"), never an invented individual or quote.
+- A precedent from another therapeutic area may only be a widely established, \
+well-known case, stated without new numbers and without an [N] citation, and \
+presented as context or judgment.
 - Items from ClinicalTrials.gov are ongoing clinical trial listings, not results: \
 describe them as trials (sponsor, design and phase, status, enrollment, expected \
 completion) and never imply outcomes.
 - Preserve URLs exactly as provided.
-- Do not use em dashes excessively. Do not use filler phrases."""
+
+"""
+    + VOICE_GUIDE
+)
 
 
 # ============================================================
@@ -340,7 +347,7 @@ def _build_prompt(
     headline = (
         title.strip()
         if custom_title
-        else "[A headline for this issue that captures its story, max 12 words]"
+        else "[A headline that states the issue's claim, max 12 words]"
     )
     focus = (
         "featured article [1]"
@@ -370,24 +377,26 @@ OUTPUT STRUCTURE — use this Markdown structure:
 
 ---
 
-[Introduction, with no heading: two short paragraphs. Set the theme and explain \
-why it matters now for people working in endometriosis, then state the issue's \
-thesis naturally within the prose: what we are trying to tell the reader. Draw \
-the reader in with the most compelling finding from {focus}. Cite with [N].]
+[Opening, with no heading: two or three short paragraphs. Open with the point, \
+using the most important finding from {focus}, and state the issue's thesis inside \
+the narrative by the second paragraph: what we want the reader to think or do \
+differently. No background an expert already knows. The one human anchor may go \
+here or in the close. Cite with [N].]
 
-## [A descriptive heading that advances the story]
-[The heart of the story: {focus}, in 2-4 paragraphs. Weave in supporting articles \
-where they corroborate, contrast or add context. Cite with [N].]
+## [A header that states a claim]
+[The heart of the argument: {focus}, in short paragraphs. Name the gap: what the \
+evidence shows and where it falls short. Weave in supporting articles where they \
+corroborate, contrast or add context. Cite with [N].]
 
-## [A descriptive heading for the next part of the story]
-[1-3 more sections like this as the material supports, each with its own \
-descriptive heading and a transition from the one before. Use the supporting \
-articles here as evidence, not as a list. Cite with [N].]
+## [A header that states the next claim]
+[One or two more sections like this as the material supports, each opening with a \
+transition from the one before. Supporting articles are evidence here, not a \
+list. Cite with [N].]
 
-## What This Means
-[Return to the thesis: what it means for clinicians, researchers and patients, \
-what is still missing from the evidence, and two or three specific things to \
-watch next, in prose. Cite with [N].]
+## [A header that states the implication]
+[Close: what this means for the reader's decisions (strategy, research, practice, \
+investment), what is still missing from the evidence, and what to watch. End on an \
+implication or action, never a summary. Cite with [N].]
 
 ---
 
@@ -563,8 +572,8 @@ def _card_html(a: Dict[str, Any], right_label: str, extra_html: str = "") -> str
 
 def _css(flyout_open: bool, selected_keys: List[str]) -> str:
     tile_sel = "".join(
-        f".st-key-nb2_tile_{k} {{ border:2px solid #1F6FEB !important; "
-        f"background:#f4f8ff !important; }}"
+        f".st-key-nb2_tile_{k} {{ border:2px solid #a8243c !important; "
+        f"background:#fbf1f2 !important; }}"
         for k in selected_keys
     )
     pad = (
@@ -577,17 +586,17 @@ def _css(flyout_open: bool, selected_keys: List[str]) -> str:
     )
     return f"""<style>
       [class*="st-key-nb2_tile_"], [class*="st-key-nb2_res_"] {{
-        background:#ffffff; border:1px solid #e4e9f0; border-radius:10px;
+        background:#ffffff; border:1px solid #e6dfd0; border-radius:10px;
         padding:14px 16px 6px 16px; box-shadow:0 2px 6px rgba(0,0,0,0.05);
         gap: 0.25rem;
       }}
       [class*="st-key-nb2_tile_"]:hover {{ box-shadow:0 4px 16px rgba(0,0,0,0.10); }}
       .nb2-excerpt {{ -webkit-line-clamp:3 !important; margin-bottom:4px !important; }}
-      .nb2-reason {{ font-size:0.84rem; color:#0d2137; background:#eef5ff;
-        border-left:3px solid #1F6FEB; border-radius:4px; padding:6px 9px; margin:6px 0 8px 0; }}
+      .nb2-reason {{ font-size:0.84rem; color:#141210; background:#f8f0dc;
+        border-left:3px solid #a8243c; border-radius:4px; padding:6px 9px; margin:6px 0 8px 0; }}
       .st-key-nb2_flyout {{
         position:fixed; top:60px; right:0; bottom:52px; width:min(450px, 100vw);
-        z-index:999; background:#f8faff; border-left:1px solid #dde4ef;
+        z-index:999; background:#fbf8f1; border-left:1px solid #e6dfd0;
         box-shadow:-8px 0 24px rgba(0,0,0,0.12); padding:16px 18px;
         overflow-y:auto; display:block;
       }}
@@ -1364,6 +1373,21 @@ def render_editor_page(deps: Dict[str, Any]) -> None:
         )
     if dirty:
         st.caption("● Unsaved changes")
+    n_dash = dash_count(md)
+    if n_dash:
+        w1, w2 = st.columns([4, 1], vertical_alignment="center")
+        w1.warning(
+            f"Voice check: {n_dash} em dash{'es' if n_dash != 1 else ''}, en dashes "
+            "or spaced hyphens used as dashes. The Evidence Gap voice guide requires "
+            "zero before publishing."
+        )
+        w2.button(
+            "Fix with Ask AI",
+            key=_k(f"ed_fix_dash_{nid}_btn"),
+            on_click=_fix_dashes,
+            args=(nid,),
+            use_container_width=True,
+        )
 
     e_col, p_col = st.columns(2, gap="medium")
     ver = st.session_state[ver_key]
@@ -1430,6 +1454,9 @@ full texts.
 - If something is in neither, say so before adding general background, and label \
 general knowledge as such. Never invent studies, numbers, trial names or quotes.
 - Keep answers focused and easy to scan; friendly doesn't mean long.
+
+Voice for newsletter text:
+{voice}
 
 Finding more articles (when the search tools are available):
 - When the user asks for more articles, sources, news, studies, trials or other \
@@ -1748,6 +1775,7 @@ def chat_system_prompt(
     if len(doc) > _CHAT_MAX_DOC_CHARS:
         doc = doc[:_CHAT_MAX_DOC_CHARS] + "\n…(truncated)"
     return CHAT_SYSTEM.format(
+        voice=VOICE_GUIDE_SHORT,
         title=title,
         coverage=coverage or "n/a",
         sources=sources_block(sources or []),
@@ -1809,6 +1837,17 @@ def _chat_stream(deps: Dict[str, Any], messages: List[Dict[str, str]]):
         yield resp.choices[0].message.content or ""
 
 
+def _fix_dashes(nid: int) -> None:
+    """Open Ask AI with a request to remove every dash the voice guide forbids."""
+    st.session_state[_k("chat_open")] = True
+    st.session_state[_k(f"chat_q_{nid}")] = (
+        "Remove every em dash, en dash and spaced hyphen used as a dash from this "
+        "newsletter, as the voice guide requires. Rewrite each sentence with a "
+        "period, colon or comma instead, keeping the meaning and citations. Give "
+        "each change as an edit block."
+    )
+
+
 def _set_chat_open(open_: bool) -> None:
     st.session_state[_k("chat_open")] = open_
 
@@ -1840,7 +1879,7 @@ def _apply_chat_edits(nid: int, msg_i: int, edit_is: List[int]) -> None:
 _CHAT_CSS = """<style>
   .st-key-nb2_chat {
     position:fixed; top:60px; right:0; bottom:52px; width:min(450px, 100vw);
-    z-index:999; background:#f8faff; border-left:1px solid #dde4ef;
+    z-index:999; background:#fbf8f1; border-left:1px solid #e6dfd0;
     box-shadow:-8px 0 24px rgba(0,0,0,0.12); padding:14px 16px;
     display:flex; flex-direction:column; flex-wrap:nowrap; gap:0.5rem;
   }
@@ -1852,19 +1891,19 @@ _CHAT_CSS = """<style>
   .st-key-nb2_chat_msgs { height:100% !important; max-height:none !important; }
   .st-key-nb2_chat [data-testid="stChatMessage"] { padding:0.5rem 0.6rem; }
   .st-key-nb2_chat [data-testid="stChatMessage"] p { font-size:0.9rem; }
-  .nb2-chat-title { font-weight:700; font-size:1.05rem; color:#0d2137; }
-  .nb2-chat-sub { font-size:0.78rem; color:#7f8c8d; margin-top:-4px; }
+  .nb2-chat-title { font-weight:700; font-size:1.05rem; color:#141210; }
+  .nb2-chat-sub { font-size:0.78rem; color:#8a8073; margin-top:-4px; }
   .st-key-nb2_themes { flex-wrap:wrap; row-gap:4px; align-items:center; }
   .st-key-nb2_themes button { min-height:0; padding:2px 10px; border-radius:14px;
     font-size:0.74rem; background:#fff; }
   .st-key-nb2_themes button p { font-size:0.74rem; }
-  .nb2-theme-lbl { font-size:0.74rem; font-weight:600; color:#0d2137; }
-  .nb2-activity { font-size:0.76rem; color:#566573; background:#eef3f9;
+  .nb2-theme-lbl { font-size:0.74rem; font-weight:600; color:#141210; }
+  .nb2-activity { font-size:0.76rem; color:#5b5348; background:#f3eee4;
     border-radius:6px; padding:5px 8px; margin-bottom:6px; line-height:1.5; }
-  .nb2-edit { border:1px solid #dde4ef; border-radius:8px; background:#fff;
+  .nb2-edit { border:1px solid #e6dfd0; border-radius:8px; background:#fff;
     padding:8px 10px; margin:6px 0 4px 0; font-size:0.82rem; }
   .nb2-edit .lbl { font-size:0.7rem; font-weight:700; text-transform:uppercase;
-    letter-spacing:.04em; color:#7f8c8d; margin-bottom:3px; }
+    letter-spacing:.04em; color:#8a8073; margin-bottom:3px; }
   .nb2-edit .old { background:#fdecec; color:#8a1f1f; text-decoration:line-through;
     border-radius:4px; padding:4px 6px; white-space:pre-wrap; margin-bottom:4px; }
   .nb2-edit .new { background:#e8f6ee; color:#14532d; border-radius:4px;

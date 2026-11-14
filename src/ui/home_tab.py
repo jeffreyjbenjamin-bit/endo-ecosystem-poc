@@ -20,58 +20,58 @@ import streamlit.components.v1 as components
 
 _CSS = """
 <style>
-.home-sub { font-size:13px; color:#7f8c8d; margin:-6px 0 14px 0; }
-.home-h { font-size:17px; font-weight:700; color:#1a2b3c; margin:4px 0 8px 0; }
+.home-sub { font-size:13px; color:#8a8073; margin:-6px 0 14px 0; }
+.home-h { font-size:17px; font-weight:700; color:#141210; margin:4px 0 8px 0; }
 .home-summary { font-size:15px; line-height:1.55; color:#1f2d3d; }
-.home-stat { border:1px solid #e3e6ea; border-radius:10px; padding:10px 14px; margin-bottom:10px;
-  background:#fbfcfd; }
-.home-stat .k { font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:#7f8c8d; }
-.home-stat .v { font-size:22px; font-weight:700; color:#1a2b3c; line-height:1.2; }
-.home-stat .d { font-size:12px; color:#566573; margin-top:2px; }
-.home-trend-head { font-size:13px; color:#566573; font-style:italic; margin-bottom:8px; min-height:2.6em; }
+.home-stat { border:1px solid #e6dfd0; border-radius:10px; padding:10px 14px; margin-bottom:10px;
+  background:#fbf8f1; }
+.home-stat .k { font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:#8a8073; }
+.home-stat .v { font-size:22px; font-weight:700; color:#141210; line-height:1.2; }
+.home-stat .d { font-size:12px; color:#5b5348; margin-top:2px; }
+.home-trend-head { font-size:13px; color:#5b5348; font-style:italic; margin-bottom:8px; min-height:2.6em; }
 .home-trend { margin-bottom:10px; }
-.home-trend b { color:#1a2b3c; }
+.home-trend b { color:#141210; }
 .home-str { display:flex; align-items:center; gap:6px; margin:3px 0 2px 0; }
-.home-str .bar { flex:0 0 90px; height:6px; background:#eef2f7; border-radius:3px; overflow:hidden; }
-.home-str .bar span { display:block; height:100%; background:#2a78d6; border-radius:3px; }
+.home-str .bar { flex:0 0 90px; height:6px; background:#f3eee4; border-radius:3px; overflow:hidden; }
+.home-str .bar span { display:block; height:100%; background:#a8243c; border-radius:3px; }
 .home-str .n { font-size:11px; color:#52514e; }
-.home-chart-sub { font-size:12px; color:#7f8c8d; margin:-6px 0 4px 0; }
-.home-trend .det { font-size:13px; color:#34495e; line-height:1.45; }
+.home-chart-sub { font-size:12px; color:#8a8073; margin:-6px 0 4px 0; }
+.home-trend .det { font-size:13px; color:#3a332c; line-height:1.45; }
 .home-chip { display:inline-block; font-size:10px; font-weight:700; text-transform:uppercase;
   padding:1px 6px; border-radius:4px; margin-left:6px; vertical-align:1px; }
 .home-chip.rising { background:#e8f6ee; color:#1e7e4a; }
 .home-chip.new { background:#fff3cd; color:#8a6d00; }
-.home-chip.steady { background:#eef2f7; color:#4a6078; }
-.home-card { border:1px solid #e3e6ea; border-radius:10px; overflow:hidden; background:#fff;
+.home-chip.steady { background:#f3eee4; color:#4a6078; }
+.home-card { border:1px solid #e6dfd0; border-radius:10px; overflow:hidden; background:#fff;
   margin-bottom:14px; height:100%; }
-.home-card .img { height:150px; background:#eef2f7 center/cover no-repeat; display:flex;
-  align-items:center; justify-content:center; color:#9aa9b8; font-size:30px; font-weight:700; }
+.home-card .img { height:150px; background:#f3eee4 center/cover no-repeat; display:flex;
+  align-items:center; justify-content:center; color:#a89c8a; font-size:30px; font-weight:700; }
 .home-card .img img { width:100%; height:150px; object-fit:cover; display:block; }
 .home-card .body { padding:10px 12px 12px 12px; }
-.home-card .meta { font-size:11px; color:#7f8c8d; margin:4px 0; }
-.home-card .title a { font-size:14px; font-weight:600; color:#1a2b3c; text-decoration:none;
+.home-card .meta { font-size:11px; color:#8a8073; margin:4px 0; }
+.home-card .title a { font-size:14px; font-weight:600; color:#141210; text-decoration:none;
   line-height:1.35; }
 .home-card .title a:hover { text-decoration:underline; }
-.home-card .snip { font-size:12.5px; color:#566573; line-height:1.45; }
+.home-card .snip { font-size:12.5px; color:#5b5348; line-height:1.45; }
 .home-badge { display:inline-block; font-size:10px; font-weight:700; padding:1px 6px; border-radius:4px;
-  background:#e8f1fb; color:#1a5c99; }
+  background:#f1ece1; color:#5b4a2f; }
 .home-badge.press { background:#fde8f1; color:#9b1d5a; }
 .home-trials { width:100%; border-collapse:collapse; font-size:12.5px; }
-.home-dev { display:flex; gap:14px; padding:14px 16px; margin-bottom:12px; background:#f8faff;
-  border:1px solid #e4e9f0; border-left:3px solid #1a7fb5; border-radius:4px; }
+.home-dev { display:flex; gap:14px; padding:14px 16px; margin-bottom:12px; background:#fbf8f1;
+  border:1px solid #e6dfd0; border-left:3px solid #c99a2e; border-radius:4px; }
 .home-dev .dev-img { flex:0 0 150px; }
 .home-dev .dev-img img { width:150px; height:100px; object-fit:cover; border-radius:4px; display:block; }
 .home-dev .dev-text { flex:1; min-width:0; }
-.home-dev .dev-head { font-size:15px; font-weight:700; color:#0d2137; line-height:1.4; margin-bottom:4px; }
-.home-dev .dev-body { font-size:14px; line-height:1.65; color:#1a2535; }
-.home-dev .dev-src { font-size:12px; color:#7f8c8d; margin-top:6px; font-style:italic; }
-.home-dev .dev-src a { color:#1a7fb5; font-style:normal; }
+.home-dev .dev-head { font-size:15px; font-weight:700; color:#141210; line-height:1.4; margin-bottom:4px; }
+.home-dev .dev-body { font-size:14px; line-height:1.65; color:#1f1b17; }
+.home-dev .dev-src { font-size:12px; color:#8a8073; margin-top:6px; font-style:italic; }
+.home-dev .dev-src a { color:#a8243c; font-style:normal; }
 @media (max-width: 640px) { .home-dev { flex-direction:column; }
   .home-dev .dev-img img { width:100%; height:160px; } }
-.home-trials th { text-align:left; color:#566573; font-weight:600; padding:6px 8px;
-  border-bottom:2px solid #e3e6ea; white-space:nowrap; }
-.home-trials td { padding:7px 8px; border-bottom:1px solid #eef0f2; vertical-align:top; }
-.home-trials .sub { font-size:11px; color:#7f8c8d; }
+.home-trials th { text-align:left; color:#5b5348; font-weight:600; padding:6px 8px;
+  border-bottom:2px solid #e6dfd0; white-space:nowrap; }
+.home-trials td { padding:7px 8px; border-bottom:1px solid #efe9dd; vertical-align:top; }
+.home-trials .sub { font-size:11px; color:#8a8073; }
 </style>
 """
 
@@ -327,14 +327,19 @@ def _images(urls: tuple) -> Dict[str, str]:
 
 
 # Reference palette (dataviz skill): categorical slots 1-3 and the blue sequential ramp.
+# Brand chart palette (from the Evidence Gap color reference), checked with the
+# dataviz palette rules: crimson, gold, plum pass lightness, chroma, colorblind
+# (all pairs dE >= 18.5) and normal-vision (>= 19.6) checks; gold is below 3:1 on
+# ivory, so charts keep a legend and the Chart data table.
 SERIES = {
-    "Articles": "#2a78d6",
-    "Press releases": "#eb6834",
-    "Clinical trials": "#1baf7a",
+    "Articles": "#a8243c",
+    "Press releases": "#c99a2e",
+    "Clinical trials": "#7a52b0",
 }
-SEQ_BLUE = ["#cde2fb", "#9ec5f4", "#6da7ec", "#3987e5", "#256abf", "#184f95", "#104281"]
-_TEXT_2 = "#52514e"
-_GRID = "#e4e2dc"
+# Sequential single-hue crimson ramp, light (near zero) to dark (most).
+SEQ_RAMP = ["#f6e1e5", "#ecbdc6", "#dd909f", "#c95e75", "#a8243c", "#831a2f", "#5a0f1f"]
+_TEXT_2 = "#5b5348"
+_GRID = "#e6dfd0"
 
 
 def _month_label(key: str) -> str:
@@ -440,7 +445,7 @@ def _heatmap(rows: List[Dict[str, Any]], months: List[str]):
             color=alt.Color(
                 "count:Q",
                 title="Sources",
-                scale=alt.Scale(range=SEQ_BLUE, domainMin=0),
+                scale=alt.Scale(range=SEQ_RAMP, domainMin=0),
                 legend=alt.Legend(
                     orient="top",
                     labelColor=_TEXT_2,
@@ -508,7 +513,7 @@ def _render_trends() -> None:
             top = max([t.get("n_evidence", 0) for t in w.get("trends") or []] + [0])
             html = [
                 f"<div class='home-h' style='font-size:15px'>{label} "
-                f"<span style='font-weight:400;color:#7f8c8d;font-size:12px'>"
+                f"<span style='font-weight:400;color:#8a8073;font-size:12px'>"
                 f"· {n} items</span></div>",
                 f"<div class='home-trend-head'>{escape(w.get('headline', ''))}</div>",
             ]

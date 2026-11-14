@@ -33,18 +33,18 @@ _COLUMNS = [
 
 _CSS = """
 <style>
-.st-key-ct_head { background:#f4f6f8; border:1px solid #e3e6ea; border-bottom:2px solid #dfe3e8;
+.st-key-ct_head { background:#f3eee4; border:1px solid #e6dfd0; border-bottom:2px solid #e2d9c7;
   border-radius:8px 8px 0 0; padding:6px 10px; margin-bottom:-1rem; }
-.st-key-ct_head p { font-size:13px; font-weight:600; color:#2c3e50; margin:0; }
-.st-key-ct_grid { border:1px solid #e3e6ea; border-top:none; border-radius:0 0 8px 8px;
+.st-key-ct_head p { font-size:13px; font-weight:600; color:#2b2621; margin:0; }
+.st-key-ct_grid { border:1px solid #e6dfd0; border-top:none; border-radius:0 0 8px 8px;
   padding:0 10px; }
-.st-key-ct_grid [data-testid="stHorizontalBlock"] { border-bottom:1px solid #eef0f2;
+.st-key-ct_grid [data-testid="stHorizontalBlock"] { border-bottom:1px solid #efe9dd;
   padding:6px 0; gap:0.6rem; }
 .st-key-ct_head [data-testid="stHorizontalBlock"] { gap:0.6rem; }
-.st-key-ct_grid [data-testid="stHorizontalBlock"]:hover { background:#fafbfc; }
+.st-key-ct_grid [data-testid="stHorizontalBlock"]:hover { background:#fbf8f1; }
 .st-key-ct_grid p, .ct-cell { font-size:13px; line-height:1.35; margin:0; }
 .ct-id a { font-weight:600; white-space:nowrap; }
-.ct-sub { font-size:11px; color:#7f8c8d; margin-top:2px; }
+.ct-sub { font-size:11px; color:#8a8073; margin-top:2px; }
 .ct-dx { display:inline-block; margin-top:4px; font-size:11px; padding:1px 6px;
   border-radius:4px; background:#e8f6ee; color:#1e7e4a; cursor:help; }
 .ct-new { display:inline-block; margin-right:6px; font-size:10px; font-weight:700;
@@ -130,7 +130,7 @@ def render_tab(tz_name: str = "America/New_York") -> None:
     st.markdown(
         "<div style='font-size:22px;font-weight:700;margin-bottom:4px'>"
         "Clinical Trials</div>"
-        "<div style='font-size:13px;color:#7f8c8d;margin-bottom:16px'>"
+        "<div style='font-size:13px;color:#8a8073;margin-bottom:16px'>"
         "Open endometriosis trials (recruiting, not yet recruiting, or enrolling by "
         f"invitation) with at least one site in the United States, from {SOURCE_NAME}. "
         "Updated automatically every day; new trials are added to the next "

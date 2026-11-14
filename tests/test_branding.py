@@ -21,8 +21,7 @@ def test_newsletter_name_and_subject():
     assert newsletter_subject("Endometriosis News") == "Endometriosis News"
     assert newsletter_subject("") == "Endometriosis News"
     assert (
-        newsletter_subject("Faster Diagnosis")
-        == "Endometriosis News — Faster Diagnosis"
+        newsletter_subject("Faster Diagnosis") == "Endometriosis News: Faster Diagnosis"
     )
 
 
@@ -61,9 +60,9 @@ def test_story_prompt_has_narrative_intro_not_executive_summary():
     }
     p = _build_prompt([a], [a], "Endometriosis News", "Run #1", "")
     assert "## Executive Summary" not in p and "Executive Summary" not in p
-    assert "Introduction, with no heading" in p and "thesis" in p
-    assert "**Endometriosis News**" in p and "## What This Means" in p
-    assert "[A headline for this issue" in p  # default title -> model writes a headline
+    assert "Opening, with no heading" in p and "thesis" in p
+    assert "**Endometriosis News**" in p and "by the second paragraph" in p
+    assert "[A headline that states the issue" in p  # default title -> model writes one
     p2 = _build_prompt([a], [], "Faster Diagnosis", "Run #1", "")
     assert "# Faster Diagnosis" in p2
     assert "call-out" in _NB2_SYSTEM
@@ -76,3 +75,45 @@ def test_story_theme_buttons():
     assert labels[0].endswith("Suggest themes") and len(labels) >= 4
     assert all("edit blocks" in ask for _, ask in STORY_THEMES[1:])
     assert "Story theme:" in CHAT_SYSTEM
+
+
+def test_voice_guide_in_newsletter_prompts():
+    from src.common.voice_guide import VOICE_GUIDE
+    from src.ui.newsletter_from_briefing import (
+        _NB2_SYSTEM,
+        _build_prompt,
+        chat_system_prompt,
+    )
+
+    assert VOICE_GUIDE in _NB2_SYSTEM
+    for rule in [
+        "Write headers as claims",
+        "State the thesis by the second paragraph",
+        "Name the gap",
+        "zero em dashes",
+        "One human anchor",
+        "Ration the contrast",
+        '"we" for company content',
+    ]:
+        assert rule in _NB2_SYSTEM, rule
+    a = {
+        "title": "A",
+        "url": "https://a",
+        "source": "s",
+        "published_date": "2026",
+        "snippet": "x",
+    }
+    p = _build_prompt([a], [], "Endometriosis News", "Run #1", "")
+    assert "header that states a claim" in p and "never a summary" in p
+    assert "## What This Means" not in p
+    chat = chat_system_prompt("T", "C", "doc", [])
+    assert "Evidence Gap voice guide" in chat and "{voice}" not in chat
+
+
+def test_dash_count():
+    from src.common.voice_guide import dash_count
+
+    assert dash_count("Clean text, with a colon: and commas.") == 0
+    assert dash_count("A \u2014 B and C\u2013D and E - F") == 3
+    # list markers, rules and hyphenated words are not dashes
+    assert dash_count("- item one\n---\n| a | b |\n|---|---|\nwell-known risk") == 0

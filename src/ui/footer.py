@@ -28,7 +28,7 @@ _FOOTER_CSS = """
 
   .st-key-app_footer {
     position: fixed; left: 0; right: 0; bottom: 0; z-index: 1000;
-    background: #ffffff; border-top: 1px solid #e4e9f0;
+    background: #ffffff; border-top: 1px solid #e6dfd0;
     padding: 6px 16px; gap: 0.75rem;
   }
   .st-key-app_footer > div {
@@ -38,11 +38,11 @@ _FOOTER_CSS = """
     margin: 0; font-size: 12.5px; color: #5f6b7a; text-align: center;
   }
   .st-key-app_footer .stButton > button {
-    background: transparent; color: #1a6eb5; border: none; border-radius: 4px;
+    background: transparent; color: #a8243c; border: none; border-radius: 4px;
     padding: 0 4px; min-height: 0; font-size: 12.5px; text-decoration: underline;
   }
   .st-key-app_footer .stButton > button:hover {
-    background: transparent; color: #0d2137;
+    background: transparent; color: #141210;
   }
   @media (max-width: 640px) {
     .st-key-app_footer { flex-wrap: wrap; justify-content: center; }

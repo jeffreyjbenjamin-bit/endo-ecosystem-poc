@@ -6,7 +6,7 @@
 <title>Newsletter editor</title>
 <style>
   :root {
-    --ink: #1a2535; --muted: #6b7a8c; --line: #dde4ef; --accent: #1F6FEB;
+    --ink: #1f1b17; --muted: #6b7a8c; --line: #e6dfd0; --accent: #a8243c;
     --bg: #ffffff; --toolbar: #f6f8fc;
   }
   * { box-sizing: border-box; }
@@ -17,17 +17,17 @@
     border: 1px solid transparent; background: transparent; color: var(--ink); border-radius: 6px;
     min-width: 30px; height: 30px; padding: 0 8px; font-size: 13px; cursor: pointer; font-family: inherit;
   }
-  .toolbar button:hover { background: #e8eef9; }
-  .toolbar button.on { background: #dbe7ff; border-color: #b9cff7; color: #0d2137; }
+  .toolbar button:hover { background: #f3eee4; }
+  .toolbar button.on { background: #f6e3e6; border-color: #e8c3ca; color: #141210; }
   .toolbar .sep { width: 1px; background: var(--line); margin: 4px 4px; }
   .scroll { overflow-y: auto; padding: 18px 26px; }
   .ProseMirror { outline: none; color: var(--ink); font-family: Calibri, Carlito, "Segoe UI", Arial, sans-serif; font-size: 15px; line-height: 1.65; min-height: 300px; }
-  .ProseMirror h1 { font-size: 1.6em; color: #0d2137; font-family: Georgia, "Times New Roman", serif; margin: 0.4em 0 0.3em; }
-  .ProseMirror h2 { font-size: 0.95em; text-transform: uppercase; letter-spacing: .05em; color: #0d2137;
+  .ProseMirror h1 { font-size: 1.6em; color: #141210; font-family: Georgia, "Times New Roman", serif; margin: 0.4em 0 0.3em; }
+  .ProseMirror h2 { font-size: 0.95em; text-transform: uppercase; letter-spacing: .05em; color: #141210;
     border-bottom: 1.5px solid var(--line); padding-bottom: 4px; margin: 1.4em 0 0.6em; font-family: Arial, sans-serif; }
-  .ProseMirror h3 { font-size: 1.1em; color: #1a4f8a; font-family: Georgia, "Times New Roman", serif; margin: 1em 0 0.4em; }
+  .ProseMirror h3 { font-size: 1.1em; color: #7f1a2d; font-family: Georgia, "Times New Roman", serif; margin: 1em 0 0.4em; }
   .ProseMirror p { margin: 0 0 0.8em; }
-  .ProseMirror a { color: #1a6eb5; }
+  .ProseMirror a { color: #a8243c; }
   .ProseMirror hr { border: none; border-top: 1px solid var(--line); margin: 1.2em 0; }
   .ProseMirror ul, .ProseMirror ol { padding-left: 1.4em; }
   .status { font: 12px Arial, sans-serif; color: var(--muted); padding: 10px 14px; }

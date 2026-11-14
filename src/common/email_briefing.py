@@ -38,11 +38,11 @@ NEWSLETTER_FONT = "Calibri, Carlito, 'Segoe UI', Arial, sans-serif"
 
 
 def newsletter_subject(title: str) -> str:
-    """Email subject for Endometriosis News (no doubled name)."""
+    """Email subject for Endometriosis News (no doubled name, no dashes)."""
     title = (title or "").strip() or NEWSLETTER_NAME
     if title.lower() == NEWSLETTER_NAME.lower():
         return NEWSLETTER_NAME
-    return f"{NEWSLETTER_NAME} — {title}"
+    return f"{NEWSLETTER_NAME}: {title}"  # voice guide: no em dashes
 
 
 def _logo_data_uri() -> str:
@@ -122,7 +122,7 @@ def _linkify_citations(text: str, ref_urls: Dict[int, str]) -> str:
         n = int(m.group(1))
         url = ref_urls.get(n)
         if url:
-            return f'<a href="{url}" style="color:#1a7fb5;font-size:11px;vertical-align:super">[{n}]</a>'
+            return f'<a href="{url}" style="color:#a8243c;font-size:11px;vertical-align:super">[{n}]</a>'
         return m.group(0)
 
     return re.sub(r"\[(\d+)\]", _replace, text)
@@ -133,7 +133,7 @@ def _md_inline(text: str) -> str:
     # Links: [text](url)
     text = re.sub(
         r"\[([^\]]+)\]\((https?://[^\)]+)\)",
-        r'<a href="\2" style="color:#1a7fb5">\1</a>',
+        r'<a href="\2" style="color:#a8243c">\1</a>',
         text,
     )
     # Bold
@@ -308,7 +308,7 @@ def _markdown_to_html(md: str, ref_urls: Dict[int, str]) -> str:
 _NEW_SINCE_BLOCK_TMPL = """\
 <div class="new-since">
   <div class="new-since-label">&#x1F195; New Since Last Report</div>
-  <p style="font-size:13px;color:#1a3d5c;margin:6px 0 8px 0">
+  <p style="font-size:13px;color:#3a2f26;margin:6px 0 8px 0">
     The following sources were not included in the previous briefing:
   </p>
   <ul>
@@ -360,7 +360,7 @@ def _build_html(
             t = item.get("title", "Untitled")
             u = item.get("url", "")
             if u:
-                li_parts.append(f'<li><a href="{u}" style="color:#1a7fb5">{t}</a></li>')
+                li_parts.append(f'<li><a href="{u}" style="color:#a8243c">{t}</a></li>')
             else:
                 li_parts.append(f"<li>{t}</li>")
         new_since_block = _NEW_SINCE_BLOCK_TMPL.format(items="\n    ".join(li_parts))
@@ -374,63 +374,64 @@ def _build_html(
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <style>
           /* Reset */
-          body {{ margin:0; padding:0; background:#f0f4f8;
+          body {{ margin:0; padding:0; background:#f3eee4;
                  font-family:Georgia,'Times New Roman',serif; }}
           /* Wrapper */
           .wrapper {{ max-width:680px; margin:32px auto 48px;
                       background:#ffffff; border-radius:8px; overflow:hidden;
                       box-shadow:0 2px 16px rgba(0,0,0,0.10); }}
           /* Header */
-          .header {{ background:#0d2137; padding:28px 36px 22px; }}
-          .header-eyebrow {{ color:#7fa8cc; font-size:11px; text-transform:uppercase;
+          .header {{ background:#141210; padding:28px 36px 22px;
+                     border-bottom:3px solid #c99a2e; }}
+          .header-eyebrow {{ color:#c99a2e; font-size:11px; text-transform:uppercase;
                              letter-spacing:0.10em; font-family:Arial,sans-serif;
                              margin-bottom:6px; }}
           .header-title {{ color:#ffffff; font-size:24px; font-weight:bold;
                            line-height:1.25; margin:0 0 6px 0; }}
-          .header-meta {{ color:#a0c4e4; font-size:12px;
+          .header-meta {{ color:#d9c9a3; font-size:12px;
                           font-family:Arial,sans-serif; margin:0; }}
           /* New-since bar */
-          .new-since {{ background:#e8f4fd; border-left:4px solid #1a7fb5;
+          .new-since {{ background:#f8f0dc; border-left:4px solid #c99a2e;
                         padding:16px 24px; margin:0; }}
           .new-since-label {{ font-size:10px; text-transform:uppercase;
-                              letter-spacing:0.10em; color:#1a7fb5;
+                              letter-spacing:0.10em; color:#a8243c;
                               font-family:Arial,sans-serif; font-weight:bold; }}
           .new-since ul {{ margin:4px 0 0 0; padding-left:20px; }}
-          .new-since li {{ font-size:13px; color:#1a3d5c; margin-bottom:4px; }}
-          .new-since a {{ color:#1a7fb5; }}
+          .new-since li {{ font-size:13px; color:#3a2f26; margin-bottom:4px; }}
+          .new-since a {{ color:#a8243c; }}
           /* Body */
           .body {{ padding:28px 36px 36px; }}
-          h1 {{ font-size:20px; color:#0d3349; border-bottom:2px solid #1a7fb5;
+          h1 {{ font-size:20px; color:#141210; border-bottom:2px solid #a8243c;
                 padding-bottom:8px; margin:0 0 6px 0; }}
-          h2 {{ font-size:12px; color:#0d3349; margin:32px 0 14px 0;
+          h2 {{ font-size:12px; color:#141210; margin:32px 0 14px 0;
                 text-transform:uppercase; letter-spacing:0.07em;
-                border-bottom:1px solid #e4e9f0; padding-bottom:5px;
+                border-bottom:1px solid #e2d3a8; padding-bottom:5px;
                 font-family:Arial,sans-serif; }}
-          h3 {{ font-size:14px; color:#1a5276; margin:18px 0 4px 0; }}
-          p {{ font-size:14px; line-height:1.7; color:#2c3e50; margin:0 0 10px 0; }}
+          h3 {{ font-size:14px; color:#7f1a2d; margin:18px 0 4px 0; }}
+          p {{ font-size:14px; line-height:1.7; color:#2b2621; margin:0 0 10px 0; }}
           ul {{ margin:0 0 12px 0; padding-left:22px; }}
-          li {{ font-size:14px; line-height:1.65; color:#2c3e50; margin-bottom:6px; }}
-          a {{ color:#1a7fb5; }}
-          strong {{ color:#0d2137; }}
-          hr {{ border:none; border-top:1px solid #e4e9f0; margin:24px 0; }}
+          li {{ font-size:14px; line-height:1.65; color:#2b2621; margin-bottom:6px; }}
+          a {{ color:#a8243c; }}
+          strong {{ color:#141210; }}
+          hr {{ border:none; border-top:1px solid #e6dfd0; margin:24px 0; }}
           /* Key Developments cards */
           .key-dev-section {{ margin:0; }}
           .dev-entry {{ padding:16px 20px; margin-bottom:12px;
-                        background:#f8faff; border:1px solid #e4e9f0;
-                        border-left:3px solid #1a7fb5; border-radius:4px; }}
-          .dev-body {{ font-size:14px; line-height:1.72; color:#1a2535;
+                        background:#fbf8f1; border:1px solid #e6dfd0;
+                        border-left:3px solid #c99a2e; border-radius:4px; }}
+          .dev-body {{ font-size:14px; line-height:1.72; color:#1f1b17;
                        margin:0 0 8px 0; }}
-          .dev-source {{ font-size:12px; color:#7f8c8d;
+          .dev-source {{ font-size:12px; color:#8a8073;
                          font-family:Arial,sans-serif; margin:0; }}
-          .dev-source a {{ color:#1a7fb5; font-style:normal; }}
+          .dev-source a {{ color:#a8243c; font-style:normal; }}
           /* Footer */
-          .footer {{ background:#f8faff; border-top:1px solid #e4e9f0;
+          .footer {{ background:#fbf8f1; border-top:1px solid #e6dfd0;
                      padding:16px 36px; font-size:11px; color:#999;
                      font-family:Arial,sans-serif; }}
-          .footer a {{ color:#7fa8cc; }}
+          .footer a {{ color:#a8243c; }}
           /* Brand logo band */
           .brand {{ background:#ffffff; text-align:center; padding:22px 36px 16px;
-                    border-bottom:1px solid #e4e9f0; }}
+                    border-bottom:1px solid #e6dfd0; }}
           .brand img {{ width:200px; max-width:60%; height:auto; display:inline-block; }}
           {newsletter_css}
         </style>

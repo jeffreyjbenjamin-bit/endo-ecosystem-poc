@@ -85,7 +85,7 @@ try:
 except Exception:  # pragma: no cover
 
     def _nl_subject(title):
-        return f"Endometriosis News — {title}"
+        return f"Endometriosis News: {title}"
 
 
 # Try to import logging helper; if missing, fall back to no-op
@@ -146,7 +146,7 @@ st.markdown(
     """
     <style>
         .stButton>button {
-            background-color: #1F6FEB;
+            background-color: #a8243c;
             color: white;
             border-radius: 8px;
             padding: 0.6em 1.2em;
@@ -158,7 +158,7 @@ st.markdown(
         /* Article cards */
         .endo-card {
             background: #ffffff;
-            border: 1px solid #e4e9f0;
+            border: 1px solid #e6dfd0;
             border-radius: 10px;
             padding: 20px 22px 16px 22px;
             margin-bottom: 18px;
@@ -187,39 +187,39 @@ st.markdown(
         .badge-nih_reporter     { background:#eaf4fb; color:#1f618d; }
         .badge-biorxiv          { background:#fef9e7; color:#9a7d0a; }
         .badge-medrxiv          { background:#fef5e7; color:#b7770d; }
-        .badge-default          { background:#f2f3f4; color:#444; }
+        .badge-default          { background:#f1ece1; color:#444; }
         .badge-press            { background:#fde8f1; color:#9b1d5a; }
 
-        .endo-title { font-size:1.08rem; font-weight:700; color:#0d2137;
+        .endo-title { font-size:1.08rem; font-weight:700; color:#141210;
                       line-height:1.4; margin:6px 0 4px 0; }
-        .endo-title a { color:#0d2137; text-decoration:none; }
-        .endo-title a:hover { color:#1a6eb5; text-decoration:underline; }
-        .endo-meta    { font-size:0.76rem; color:#7f8c8d; margin-bottom:8px; }
-        .endo-excerpt { font-size:0.88rem; color:#2c3e50; line-height:1.6;
+        .endo-title a { color:#141210; text-decoration:none; }
+        .endo-title a:hover { color:#a8243c; text-decoration:underline; }
+        .endo-meta    { font-size:0.76rem; color:#8a8073; margin-bottom:8px; }
+        .endo-excerpt { font-size:0.88rem; color:#2b2621; line-height:1.6;
                         margin-bottom:10px; display:-webkit-box;
                         -webkit-line-clamp:4; -webkit-box-orient:vertical; overflow:hidden; }
         .endo-tags { margin-top:8px; }
-        .endo-tag  { display:inline-block; font-size:0.68rem; background:#eaf0fb;
+        .endo-tag  { display:inline-block; font-size:0.68rem; background:#f1ece1;
                      color:#2e4482; border-radius:3px; padding:2px 7px;
                      margin-right:5px; margin-bottom:3px; }
-        .endo-readmore { font-size:0.78rem; font-weight:600; color:#1a6eb5;
+        .endo-readmore { font-size:0.78rem; font-weight:600; color:#a8243c;
                          text-decoration:none; }
         .endo-readmore:hover { text-decoration:underline; }
         .endo-quality { float:right; font-size:0.70rem; color:#aab; margin-top:2px; }
 
         /* Briefing panel */
-        .brief-panel { background:#0d2137; border-radius:10px;
+        .brief-panel { background:#141210; border-radius:10px;
                        overflow:hidden; box-shadow:-3px 0 18px rgba(0,0,0,0.12); }
-        .brief-panel-header { background:#0d2137; color:#ffffff;
+        .brief-panel-header { background:#141210; color:#ffffff;
                               padding:14px 18px 10px 18px; font-size:0.72rem;
                               font-weight:700; letter-spacing:0.08em; text-transform:uppercase; }
-        .brief-panel-run { color:#7fa8cc; font-size:0.68rem; font-weight:400;
+        .brief-panel-run { color:#c99a2e; font-size:0.68rem; font-weight:400;
                            letter-spacing:0; text-transform:none; margin-top:2px; }
-        .brief-panel-body { background:#f8faff; padding:20px 18px 24px 18px;
-                            font-size:0.84rem; line-height:1.72; color:#1a2535;
+        .brief-panel-body { background:#fbf8f1; padding:20px 18px 24px 18px;
+                            font-size:0.84rem; line-height:1.72; color:#1f1b17;
                             border-radius:0 0 10px 10px; }
-        .brief-panel-body h2 { font-size:0.82rem; font-weight:700; color:#0d2137;
-                               border-bottom:1.5px solid #dde4ef; padding-bottom:3px;
+        .brief-panel-body h2 { font-size:0.82rem; font-weight:700; color:#141210;
+                               border-bottom:1.5px solid #e6dfd0; padding-bottom:3px;
                                margin-top:18px; margin-bottom:8px;
                                text-transform:uppercase; letter-spacing:0.04em; }
 
@@ -1420,9 +1420,9 @@ if SHOW_LEGACY_TABS:
                     _ti_header_col, _ti_btn_col = st.columns([6, 1], gap="small")
                     with _ti_header_col:
                         st.markdown(
-                            "<div style='font-size:15px;font-weight:700;color:#0d2137;margin-bottom:2px'>"
+                            "<div style='font-size:15px;font-weight:700;color:#141210;margin-bottom:2px'>"
                             "Topic Intelligence</div>"
-                            "<div style='font-size:12px;color:#7f8c8d;margin-bottom:8px'>"
+                            "<div style='font-size:12px;color:#8a8073;margin-bottom:8px'>"
                             "AI-identified topics you can click to filter the highlights below.</div>",
                             unsafe_allow_html=True,
                         )
@@ -1548,9 +1548,9 @@ Return only the JSON array, no other text."""
                             )
                             if _active_tc:
                                 st.markdown(
-                                    f"<div style='background:#e8f4fd;border-left:3px solid #1a7fb5;"
+                                    f"<div style='background:#f8f0dc;border-left:3px solid #a8243c;"
                                     f"border-radius:4px;padding:8px 14px;margin:8px 0 4px 0;"
-                                    f"font-size:13px;color:#0d3349'>"
+                                    f"font-size:13px;color:#141210'>"
                                     f"<strong>{_active_tc['label']}</strong> — {_active_tc['summary']}"
                                     f"</div>",
                                     unsafe_allow_html=True,
@@ -1566,9 +1566,9 @@ Return only the JSON array, no other text."""
                                 ]
                     else:
                         st.markdown(
-                            "<div style='background:#f8faff;border:1px dashed #b8d9f0;"
+                            "<div style='background:#fbf8f1;border:1px dashed #e2d3a8;"
                             "border-radius:6px;padding:10px 16px;margin-bottom:12px;"
-                            "font-size:13px;color:#7f8c8d'>"
+                            "font-size:13px;color:#8a8073'>"
                             "Click <strong>✨ Generate</strong> — the AI will identify top topics "
                             "you can click to filter the highlights below."
                             "</div>",
@@ -1580,7 +1580,7 @@ Return only the JSON array, no other text."""
                 with _ph_hdr_col:
                     st.markdown(
                         f"#### Select Highlights &nbsp;"
-                        f"<span style='font-size:13px;color:#7f8c8d'>"
+                        f"<span style='font-size:13px;color:#8a8073'>"
                         f"{len(_nl_all_items)} items available</span>",
                         unsafe_allow_html=True,
                     )
@@ -1682,8 +1682,8 @@ Return only the JSON array, no other text."""
 
                     _n_sel = len(st.session_state["nl_selected_ids"])
                     st.markdown(
-                        f"<div style='margin:12px 0 8px 0;font-size:13px;color:#7f8c8d'>"
-                        f"<strong style='color:#0a2540'>{_n_sel}</strong> highlight(s) selected</div>",
+                        f"<div style='margin:12px 0 8px 0;font-size:13px;color:#8a8073'>"
+                        f"<strong style='color:#141210'>{_n_sel}</strong> highlight(s) selected</div>",
                         unsafe_allow_html=True,
                     )
 
@@ -1755,8 +1755,8 @@ Return only the JSON array, no other text."""
                         )
                     else:
                         st.markdown(
-                            "<div style='background:#f0f4f8;border:1px solid #dce3ec;"
-                            "border-radius:6px;padding:8px 12px;font-size:12px;color:#7f8c8d'>"
+                            "<div style='background:#f3eee4;border:1px solid #e6dfd0;"
+                            "border-radius:6px;padding:8px 12px;font-size:12px;color:#8a8073'>"
                             "No newsletter queued</div>",
                             unsafe_allow_html=True,
                         )
@@ -1829,9 +1829,9 @@ Return only the JSON array, no other text."""
                 # ── Generate newsletter ────────────────────────────
                 _n_sel_b = len(st.session_state.get("nl_selected_ids", set()))
                 st.markdown(
-                    f"<div style='font-size:13px;color:#7f8c8d;margin-bottom:12px'>"
-                    f"<strong style='color:#0a2540'>{_n_sel_b}</strong> highlight(s) selected — "
-                    f"<a href='#' style='color:#1a7fb5'>go back to Select Highlights to change</a></div>",
+                    f"<div style='font-size:13px;color:#8a8073;margin-bottom:12px'>"
+                    f"<strong style='color:#141210'>{_n_sel_b}</strong> highlight(s) selected — "
+                    f"<a href='#' style='color:#a8243c'>go back to Select Highlights to change</a></div>",
                     unsafe_allow_html=True,
                 )
 
@@ -2002,7 +2002,7 @@ For each finding, write a standalone paragraph block — no bullet dashes. Follo
                     with _ed_col:
                         st.markdown(
                             "<div style='font-size:11px;text-transform:uppercase;"
-                            "letter-spacing:.07em;color:#7f8c8d;margin-bottom:4px'>Edit</div>",
+                            "letter-spacing:.07em;color:#8a8073;margin-bottom:4px'>Edit</div>",
                             unsafe_allow_html=True,
                         )
 
@@ -2083,7 +2083,7 @@ For each finding, write a standalone paragraph block — no bullet dashes. Follo
                                             st.warning("Phrase not found in draft.")
 
                             st.markdown(
-                                "<div style='margin-top:8px;font-size:12px;color:#7f8c8d'>Insert at end of draft:</div>",
+                                "<div style='margin-top:8px;font-size:12px;color:#8a8073'>Insert at end of draft:</div>",
                                 unsafe_allow_html=True,
                             )
                             _ins_cols = st.columns(6, gap="small")
@@ -2133,7 +2133,7 @@ For each finding, write a standalone paragraph block — no bullet dashes. Follo
                     with _prev_col:
                         st.markdown(
                             "<div style='font-size:11px;text-transform:uppercase;"
-                            "letter-spacing:.07em;color:#7f8c8d;margin-bottom:4px'>Preview</div>",
+                            "letter-spacing:.07em;color:#8a8073;margin-bottom:4px'>Preview</div>",
                             unsafe_allow_html=True,
                         )
                         _preview_html = render_newsletter_html(
@@ -2424,7 +2424,7 @@ with tab_nl_config:
     st.markdown(
         "<div style='font-size:22px;font-weight:700;margin-bottom:4px'>"
         "⚙️ Settings</div>"
-        "<div style='font-size:13px;color:#7f8c8d;margin-bottom:20px'>"
+        "<div style='font-size:13px;color:#8a8073;margin-bottom:20px'>"
         "Manage users, the email mailing list, the daily send schedule, and "
         "send test dispatches on demand.</div>",
         unsafe_allow_html=True,
@@ -2530,16 +2530,16 @@ with tab_nl_config:
             pass
         st.markdown(
             f"""
-            <div style="background:#f8faff;border:1px solid #e4e9f0;border-radius:8px;
+            <div style="background:#fbf8f1;border:1px solid #e6dfd0;border-radius:8px;
                         padding:16px 20px;margin-top:4px">
               <div style="font-size:11px;text-transform:uppercase;letter-spacing:.07em;
-                          color:#7fa8cc;margin-bottom:6px;font-family:Arial,sans-serif">
+                          color:#c99a2e;margin-bottom:6px;font-family:Arial,sans-serif">
                 Current Schedule
               </div>
-              <div style="font-size:22px;font-weight:700;color:#0d2137;margin-bottom:4px">
+              <div style="font-size:22px;font-weight:700;color:#141210;margin-bottom:4px">
                 {_nlc_sched_display_time}
               </div>
-              <div style="font-size:12px;color:#7f8c8d">
+              <div style="font-size:12px;color:#8a8073">
                 Daily · {_nlc_tz_label} &nbsp;·&nbsp;
                 {len(load_recipients())} recipient(s)
               </div>
@@ -2593,7 +2593,7 @@ with tab_nl_config:
 
     st.markdown(
         f"#### Mailing List &nbsp;"
-        f"<span style='font-size:13px;color:#7f8c8d'>{len(_nlc_recipients)} recipient(s)</span>",
+        f"<span style='font-size:13px;color:#8a8073'>{len(_nlc_recipients)} recipient(s)</span>",
         unsafe_allow_html=True,
     )
 
@@ -3485,7 +3485,7 @@ with tab_search:
                     """
                     <div class="brief-panel">
                       <div class="brief-panel-header">Intelligence Briefing</div>
-                      <div class="brief-panel-body" style="color:#7fa8cc;font-style:italic;
+                      <div class="brief-panel-body" style="color:#c99a2e;font-style:italic;
                            text-align:center;padding:40px 18px;">
                         Run a search to generate your<br>intelligence briefing.
                       </div>
@@ -3945,7 +3945,7 @@ if SHOW_LEGACY_TABS:
                     """
                 <div class="brief-panel">
                   <div class="brief-panel-header">AI Briefing</div>
-                  <div class="brief-panel-body" style="color:#7fa8cc;font-style:italic;
+                  <div class="brief-panel-body" style="color:#c99a2e;font-style:italic;
                        text-align:center;padding:40px 18px;">
                     Apply filters then click<br><strong style="color:#a8c8e8">
                     Generate AI Briefing</strong><br>to synthesize the current view.
