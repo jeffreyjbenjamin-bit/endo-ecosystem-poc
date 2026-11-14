@@ -41,7 +41,11 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(REPO_ROOT))
 
-from src.common.email_briefing import send_briefing, smtp_configured  # noqa: E402
+from src.common.email_briefing import (  # noqa: E402
+    newsletter_subject,
+    send_briefing,
+    smtp_configured,
+)
 from src.common.paths import STATE_DIR  # noqa: E402
 
 DATA_DIR = STATE_DIR
@@ -440,11 +444,11 @@ def main(force: bool = False, auto_search: bool = False) -> None:
             nl = _load_newsletter(pending_id)
             if nl:
                 nl_text = (nl.get("content_md") or "").strip()
-                nl_title = nl.get("title") or "Endometriosis Newsletter"
+                nl_title = nl.get("title") or "Endometriosis News"
                 nl_recips = _load_recipients(("newsletter", "both"))
                 if nl_recips and nl_text:
-                    nl_subject = f"Evidence Gap — {nl_title}"
-                    nl_meta = f"Endometriosis Newsletter · Sent {sent_utc}"
+                    nl_subject = newsletter_subject(nl_title)
+                    nl_meta = f"Endometriosis News · Sent {sent_utc}"
                     ok_nl, fail_nl = [], []
                     print(
                         f"\nSending Newsletter #{pending_id} to {len(nl_recips)} subscriber(s)…"
@@ -457,6 +461,7 @@ def main(force: bool = False, auto_search: bool = False) -> None:
                                 title=nl_title,
                                 meta=nl_meta,
                                 briefing_md=nl_text,
+                                kind="newsletter",
                             )
                             _mark_sent(recip["id"])
                             ok_nl.append(f"{recip['name']} <{recip['email']}>")

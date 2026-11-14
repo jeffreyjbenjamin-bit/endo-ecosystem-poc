@@ -282,10 +282,10 @@ def _dev_card(d: Dict[str, str], image: str) -> str:
     )
 
 
-def _briefing_html(md: str, title: str, meta: str) -> str:
+def _briefing_html(md: str, title: str, meta: str, kind: str = "briefing") -> str:
     from src.common.email_briefing import render_newsletter_html
 
-    return render_newsletter_html(title=title, meta=meta, briefing_md=md)
+    return render_newsletter_html(title=title, meta=meta, briefing_md=md, kind=kind)
 
 
 @st.dialog("Latest Intelligence Briefing", width="large")
@@ -301,12 +301,14 @@ def _briefing_dialog(run: Dict[str, Any]) -> None:
     )
 
 
-@st.dialog("Latest newsletter", width="large")
+@st.dialog("Latest Endometriosis News", width="large")
 def _newsletter_dialog(nl: Dict[str, Any], open_editor: Callable) -> None:
-    title = nl.get("title") or "Endometriosis Newsletter"
-    meta = "Newsletter · " + _fmt_date(nl.get("updated_ts") or nl.get("created_ts"))
+    title = nl.get("title") or "Endometriosis News"
+    meta = "Endometriosis News · " + _fmt_date(
+        nl.get("updated_ts") or nl.get("created_ts")
+    )
     components.html(
-        _briefing_html(nl.get("content_md") or "", title, meta),
+        _briefing_html(nl.get("content_md") or "", title, meta, kind="newsletter"),
         height=680,
         scrolling=True,
     )
@@ -673,14 +675,14 @@ def render_tab(deps: Dict[str, Any]) -> None:
             nl = nls[0]
             st.markdown(
                 _stat(
-                    "Latest newsletter",
+                    "Latest Endometriosis News",
                     _fmt_date(nl.get("updated_ts") or nl.get("created_ts")),
                     escape(nl.get("title") or "Untitled"),
                 ),
                 unsafe_allow_html=True,
             )
             if st.button(
-                "📝 Open latest newsletter",
+                "📝 Open latest Endometriosis News",
                 key="home_open_nl",
                 use_container_width=True,
             ):

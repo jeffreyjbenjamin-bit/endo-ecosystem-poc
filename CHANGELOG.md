@@ -14,6 +14,15 @@ footer. Keep each version's changes in its own <ul> list. -->
 
 <tr><td>2026-11-14</td><td>
 
+<b>v1.19.0</b>
+<ul>
+<li>The newsletter is now <b>Endometriosis News</b> everywhere it is named: default title, masthead, email subject and header, previews, Home and the daily send.</li>
+<li>Newsletters are written as a <b>story</b>: a headline, an introduction that sets the theme and why it matters now with the thesis woven into the narrative (no Executive Summary), narrative sections with transitions, and a closing "What This Means".</li>
+<li>Ask AI (newsletter editor) has <b>Story theme</b> buttons: Suggest themes, plus ready-made themes (Closing the diagnosis gap, Beyond hormonal treatment, Patients' lived experience, From research to the clinic, What's still missing) that rewrite the headline and introduction as edits you can apply.</li>
+<li>Newsletter body text uses <b>Calibri</b> (in emails, previews and the editor).</li>
+<li>New <b>Endometriosis Evidence Gap logo</b> in the app banner, sign-in screen and browser tab, and at the top of every Endometriosis News and Intelligence Briefing email and preview (attached in emails so it shows without loading images).</li>
+</ul>
+
 <b>v1.18.1</b>
 <ul>
 <li>Ask AI (newsletter editor) now answers in a warmer, friendlier, more conversational tone: it notes what already works, offers suggestions as options, and suggests a helpful next step, while staying accurate and to the point.</li>

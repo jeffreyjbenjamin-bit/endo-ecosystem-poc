@@ -30,6 +30,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 import streamlit as st
 
+from src.common.email_briefing import newsletter_subject
 from src.services import ai_service as ai
 from src.ui.wysiwyg import tiptap_editor
 
@@ -37,16 +38,29 @@ MAX_BASE_ARTICLES = 2
 _SS = "nb2_"  # session-state key prefix for this tab
 
 _NB2_SYSTEM = """\
-You are a professional medical intelligence editor producing a newsletter for life \
-sciences professionals focused on endometriosis.
+You are the editor of Endometriosis News, a newsletter for life sciences \
+professionals focused on endometriosis, published by Evidence Gap ("Making sense of \
+what's missing"). You write each issue as one coherent story, not a digest.
 
 Your output must be clean, publication-ready Markdown that follows the structure in \
 the user message exactly.
 
+STORYTELLING:
+- Decide what the issue is trying to tell readers: one clear thesis, the single \
+idea a reader should come away with. Build the whole issue around it.
+- Open with an introduction that sets the theme, explains why it matters now, and \
+states the thesis inside the narrative. Never label it ("Thesis:", "In this \
+issue", "Executive summary") or put it in a call-out box.
+- Let each section move the story forward, with transitions that connect one \
+section to the next. Use the featured articles as the heart of the story and the \
+supporting articles as evidence, contrast or context woven into the prose, not as \
+a separate list.
+- Close by returning to the thesis: what it means for clinicians, researchers and \
+patients, what is still missing, and what to watch next.
+
 EDITORIAL RULES:
-- Build the newsletter around the FEATURED articles; supporting articles add context, \
-corroboration, contrast, or broader landscape.
-- Write in confident, precise, third-person editorial prose.
+- Write in confident, precise, engaging third-person editorial prose for an \
+informed professional reader.
 - Every factual claim must cite at least one source using [N] inline, where N is the \
 article number given in the user message.
 - Only use facts present in the provided article titles, summaries, and metadata. \
@@ -85,7 +99,7 @@ def _init_state() -> None:
         ("web_days", 365),
         ("keywords", ""),
         ("only_cited", False),
-        ("title", "Endometriosis Newsletter"),
+        ("title", "Endometriosis News"),
         ("note", ""),
     ]:
         if _k(name) not in st.session_state:
@@ -320,23 +334,28 @@ def _build_prompt(
         "\n\n".join(_article_block(n, a) for n, a in numbered[len(base) :])
         or "(none selected)"
     )
-    feature_heading = "Lead Story" if len(base) == 1 else "Feature Stories"
-    feature_instr = (
-        "A focused 3-4 paragraph editorial on featured article [1], weaving in "
-        "supporting articles where they add context."
-        if len(base) == 1
-        else "Two sections, one per featured article, each with a ### headline and "
-        "2-3 paragraphs, weaving in supporting articles where they add context. "
-        "Close with one short paragraph connecting the two."
-    )
-    return f"""Produce an endometriosis newsletter built around the FEATURED article(s) below, \
-using the SUPPORTING articles for context.
+    from src.common.email_briefing import NEWSLETTER_NAME
 
-NEWSLETTER CONFIG:
-- Title: {title}
+    custom_title = title.strip() and title.strip().lower() != NEWSLETTER_NAME.lower()
+    headline = (
+        title.strip()
+        if custom_title
+        else "[A headline for this issue that captures its story, max 12 words]"
+    )
+    focus = (
+        "featured article [1]"
+        if len(base) == 1
+        else "the featured articles [1] and [2], and how they connect"
+    )
+    return f"""Write this issue of {NEWSLETTER_NAME} as a story built around the \
+FEATURED article(s) below, using the SUPPORTING articles as evidence and context.
+
+ISSUE CONFIG:
+- Publication: {NEWSLETTER_NAME}
+- Title: {title or NEWSLETTER_NAME}
 - Seeded from Intelligence Briefing: {briefing_label}
 - Published: {today}
-{('- Editorial note: ' + note) if note else ''}
+{('- Editorial note (follow it, including any requested theme): ' + note) if note else ''}
 
 FEATURED ARTICLES:
 {featured_block}
@@ -344,41 +363,31 @@ FEATURED ARTICLES:
 SUPPORTING ARTICLES:
 {supporting_block}
 
-OUTPUT STRUCTURE — use this exact Markdown structure:
+OUTPUT STRUCTURE — use this Markdown structure:
 
-# {title}
-**Endometriosis Newsletter**
-*Published {today}*
-
----
-
-## Executive Summary
-[2-3 sentences on what the featured article(s) show and why readers should care.]
+# {headline}
+**{NEWSLETTER_NAME}** · *Published {today}*
 
 ---
 
-## {feature_heading}
-[{feature_instr} Cite with [N].]
+[Introduction, with no heading: two short paragraphs. Set the theme and explain \
+why it matters now for people working in endometriosis, then state the issue's \
+thesis naturally within the prose: what we are trying to tell the reader. Draw \
+the reader in with the most compelling finding from {focus}. Cite with [N].]
 
----
+## [A descriptive heading that advances the story]
+[The heart of the story: {focus}, in 2-4 paragraphs. Weave in supporting articles \
+where they corroborate, contrast or add context. Cite with [N].]
 
-## Key Developments
-For each supporting article, one standalone block, separated by blank lines:
+## [A descriptive heading for the next part of the story]
+[1-3 more sections like this as the material supports, each with its own \
+descriptive heading and a transition from the one before. Use the supporting \
+articles here as evidence, not as a list. Cite with [N].]
 
-**[Bolded one-line headline.]** [N] Two to three sentences: what it reports and how it \
-relates to the featured story.
-
-*→ [Descriptive link text](URL)*
-
----
-
-## Why It Matters
-[1-2 paragraphs on clinical, scientific, or strategic significance.]
-
----
-
-## What to Watch
-[3-5 concrete follow-ups grounded in the articles.]
+## What This Means
+[Return to the thesis: what it means for clinicians, researchers and patients, \
+what is still missing from the evidence, and two or three specific things to \
+watch next, in prose. Cite with [N].]
 
 ---
 
@@ -1178,7 +1187,7 @@ def _send_dialog(deps: Dict[str, Any], nid: int, title: str, md: str) -> None:
             "subscriptions in Settings (⚙️)."
         )
         return
-    subject = f"Evidence Gap — {title}"
+    subject = newsletter_subject(title)
     st.markdown(f"**Subject:** {_esc(subject)}", unsafe_allow_html=True)
     st.markdown(
         f"This emails **Newsletter #{nid}** now to **{len(recips)}** newsletter "
@@ -1205,7 +1214,7 @@ def _send_dialog(deps: Dict[str, Any], nid: int, title: str, md: str) -> None:
 
     deps["update_newsletter"](nid, md)
     meta = (
-        "Endometriosis Newsletter · Sent "
+        "Endometriosis News · Sent "
         f"{datetime.now(timezone.utc).strftime('%B %d, %Y %H:%M UTC')}"
     )
     ok, fail = [], []
@@ -1218,6 +1227,7 @@ def _send_dialog(deps: Dict[str, Any], nid: int, title: str, md: str) -> None:
                 title=title,
                 meta=meta,
                 briefing_md=md,
+                kind="newsletter",
             )
             deps["mark_recipient_sent"](r["id"])
             ok.append(r)
@@ -1258,7 +1268,7 @@ def render_editor_page(deps: Dict[str, Any]) -> None:
         st.error(f"Newsletter #{nid} was not found.")
         return
 
-    title = nl.get("title") or "Endometriosis Newsletter"
+    title = nl.get("title") or "Endometriosis News"
     saved_text = nl.get("content_md") or ""
     md_key, ver_key = _k(f"ed_md_{nid}"), _k(f"ed_ver_{nid}")
     if md_key not in st.session_state:
@@ -1379,8 +1389,9 @@ def render_editor_page(deps: Dict[str, Any]) -> None:
         st.caption("Email preview")
         html = deps["render_newsletter_html"](
             title,
-            f"Endometriosis Newsletter · {nl.get('coverage_period') or ''}",
+            f"Endometriosis News · {nl.get('coverage_period') or ''}",
             st.session_state[md_key],
+            kind="newsletter",
         )
         deps["html_component"](html, height=780, scrolling=True)
 
@@ -1436,6 +1447,16 @@ and one sentence on why it fits and where it would go.
 section with an inline Markdown link, or add or extend a "Further reading" section. \
 New articles get inline links, not new [N] numbers ([N] refers to SOURCES).
 
+Story theme:
+Each issue is written as a story with one thesis, stated inside the introduction's \
+narrative (never as a labelled call-out). When asked to set or change the theme, \
+rewrite the headline (the # line) and the introduction so the theme and a clear \
+thesis come through naturally, and adjust section openings, transitions and "What \
+This Means" so the whole story supports it. Give these changes as edit blocks. If \
+the sources don't support a requested theme well, say so kindly and suggest the \
+closest theme they do support. When asked to suggest themes, give each a short \
+name, a one-sentence thesis and why it fits these sources, then ask which to use.
+
 Suggesting edits:
 Whenever the user asks for a change, or you recommend one, include each change as \
 an edit block that the app shows with an Apply button:
@@ -1469,6 +1490,31 @@ CHAT_STARTERS = [
     "Suggest 3 better titles",
     "Check each claim against the sources",
     "Tighten the lead story to under 150 words",
+]
+
+# Story theme buttons in the Ask AI panel: (button label, message sent).
+_THEME_ASK = (
+    "Set the story theme to \u201c{theme}\u201d. Rewrite the headline and "
+    "introduction so this theme and a clear thesis come through in the narrative "
+    "(not as a call-out), and adjust the section transitions and \u201cWhat This "
+    "Means\u201d to support it. Give the changes as edit blocks."
+)
+STORY_THEMES = [
+    (
+        "\U0001f4a1 Suggest themes",
+        "Suggest three possible story themes for this newsletter. For each, give a "
+        "short name, a one-sentence thesis, and why it fits these sources. Then ask "
+        "me which one to use.",
+    ),
+] + [
+    (t, _THEME_ASK.format(theme=t))
+    for t in [
+        "Closing the diagnosis gap",
+        "Beyond hormonal treatment",
+        "Patients\u2019 lived experience",
+        "From research to the clinic",
+        "What\u2019s still missing",
+    ]
 ]
 
 # Client tool: the app's own content. Web search is Anthropic's server tool
@@ -1808,6 +1854,11 @@ _CHAT_CSS = """<style>
   .st-key-nb2_chat [data-testid="stChatMessage"] p { font-size:0.9rem; }
   .nb2-chat-title { font-weight:700; font-size:1.05rem; color:#0d2137; }
   .nb2-chat-sub { font-size:0.78rem; color:#7f8c8d; margin-top:-4px; }
+  .st-key-nb2_themes { flex-wrap:wrap; row-gap:4px; align-items:center; }
+  .st-key-nb2_themes button { min-height:0; padding:2px 10px; border-radius:14px;
+    font-size:0.74rem; background:#fff; }
+  .st-key-nb2_themes button p { font-size:0.74rem; }
+  .nb2-theme-lbl { font-size:0.74rem; font-weight:600; color:#0d2137; }
   .nb2-activity { font-size:0.76rem; color:#566573; background:#eef3f9;
     border-radius:6px; padding:5px 8px; margin-bottom:6px; line-height:1.5; }
   .nb2-edit { border:1px solid #dde4ef; border-radius:8px; background:#fff;
@@ -1956,6 +2007,22 @@ def _render_chat(
                     )
             for i, m in enumerate(history):
                 _render_message(nid, i, m)
+        with st.container(horizontal=True, key="nb2_themes", gap="small"):
+            st.markdown(
+                "<span class='nb2-theme-lbl'>\U0001f3af Story theme</span>",
+                unsafe_allow_html=True,
+                width="content",
+            )
+            for i, (label, ask) in enumerate(STORY_THEMES):
+                st.button(
+                    label,
+                    key=_k(f"chat_theme_{i}_btn"),
+                    on_click=_queue_question,
+                    args=(nid, ask),
+                    help=(
+                        ask if i else "Ask for three theme ideas that fit these sources"
+                    ),
+                )
         typed = st.chat_input("Ask about this newsletter…", key=_k(f"chat_in_{nid}"))
         question = typed or st.session_state.pop(q_key, None)
         if question:

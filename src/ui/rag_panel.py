@@ -33,7 +33,13 @@ from openai import AzureOpenAI
 # ============================================================
 # Page config (must be first Streamlit call)
 # ============================================================
-st.set_page_config(page_title="Endo PoC — RAG Panel", layout="wide")
+_STATIC_DIR = Path(__file__).resolve().parent / "static"
+LOGO_PATH = _STATIC_DIR / "evidence_gap_logo.png"
+st.set_page_config(
+    page_title="Endometriosis Evidence Gap",
+    page_icon=str(_STATIC_DIR / "evidence_gap_icon.png"),
+    layout="wide",
+)
 
 # ============================================================
 # Repo root / environment
@@ -61,7 +67,7 @@ try:
     )
 except Exception:
 
-    def send_briefing(to_addr, subject, title, meta, briefing_md, new_items=None):
+    def send_briefing(to_addr, subject, title, meta, briefing_md, new_items=None, **kw):
         raise RuntimeError("email_briefing not available")
 
     def smtp_configured():
@@ -70,8 +76,16 @@ except Exception:
     def load_smtp_config():
         return None
 
-    def render_newsletter_html(title, meta, briefing_md, new_items=None):
+    def render_newsletter_html(title, meta, briefing_md, new_items=None, **kw):
         return f"<pre>{briefing_md}</pre>"
+
+
+try:
+    from src.common.email_briefing import newsletter_subject as _nl_subject
+except Exception:  # pragma: no cover
+
+    def _nl_subject(title):
+        return f"Endometriosis News — {title}"
 
 
 # Try to import logging helper; if missing, fall back to no-op
@@ -107,7 +121,8 @@ if "pw_ok" not in st.session_state:
 
 if APP_PASSWORD:
     if not st.session_state["pw_ok"]:
-        st.subheader("🔒 Endo Ecosystem Access")
+        st.image(str(LOGO_PATH), width=220)
+        st.subheader("🔒 Sign in")
         pwd = st.text_input("Enter application password", type="password")
         if not pwd:
             st.stop()
@@ -1093,7 +1108,7 @@ def _close_config() -> None:
 with st.container(
     horizontal=True, vertical_alignment="center", horizontal_alignment="distribute"
 ):
-    st.title("Evidence Gap")
+    st.image(str(LOGO_PATH), width=170)  # Endometriosis Evidence Gap logo
     if _CONFIG_VIEW:
         st.button("← Back", key="config_back", on_click=_close_config)
     else:
@@ -1198,9 +1213,7 @@ if SHOW_LEGACY_TABS:
             _nl_rag_runs = load_rag_briefs(limit=30)
 
             # ── Read settings from session state (persist across views)
-            _nl_title = st.session_state.get(
-                "nl_title_input", "Endometriosis Newsletter"
-            )
+            _nl_title = st.session_state.get("nl_title_input", "Endometriosis News")
             _nl_period = st.session_state.get("nl_period_input", "")
             _nl_source_sel = st.session_state.get("nl_source_sel", "Both")
             _nl_date_range = st.session_state.get("nl_date_range", 90)
@@ -1329,7 +1342,7 @@ if SHOW_LEGACY_TABS:
                     with _nl_c1:
                         _nl_title = st.text_input(
                             "Newsletter title",
-                            value=_nl_title or "Endometriosis Newsletter",
+                            value=_nl_title or "Endometriosis News",
                             key="nl_title_input",
                         )
                         _nl_period = st.text_input(
@@ -1756,10 +1769,10 @@ Return only the JSON array, no other text."""
                             "No recipients subscribed to Newsletter. Update subscriptions in Settings (⚙️)."
                         )
                     else:
-                        _qs_title = _nl_title or "Endometriosis Newsletter"
-                        _qs_subject = f"Evidence Gap — {_qs_title}"
+                        _qs_title = _nl_title or "Endometriosis News"
+                        _qs_subject = _nl_subject(_qs_title)
                         _qs_meta = (
-                            f"Endometriosis Newsletter · "
+                            f"Endometriosis News · "
                             f"Sent {datetime.now(timezone.utc).strftime('%B %d, %Y %H:%M UTC')}"
                         )
                         _qs_ok, _qs_fail = [], []
@@ -1772,6 +1785,7 @@ Return only the JSON array, no other text."""
                                     title=_qs_title,
                                     meta=_qs_meta,
                                     briefing_md=st.session_state["nl_draft"],
+                                    kind="newsletter",
                                 )
                                 mark_recipient_sent(_qs_r["id"])
                                 _qs_ok.append(f"{_qs_r['name']} <{_qs_r['email']}>")
@@ -1794,7 +1808,7 @@ Return only the JSON array, no other text."""
                     # Save draft first if not yet saved
                     if not _nl_saved_id_b:
                         _qs_sid = save_newsletter(
-                            title=_nl_title or "Endometriosis Newsletter",
+                            title=_nl_title or "Endometriosis News",
                             coverage_period=_nl_period or "Recent",
                             content_md=st.session_state["nl_draft"],
                             sources=[],
@@ -2124,8 +2138,9 @@ For each finding, write a standalone paragraph block — no bullet dashes. Follo
                         )
                         _preview_html = render_newsletter_html(
                             title=_nl_title or "Newsletter Preview",
-                            meta=f"Endometriosis Intelligence · {datetime.now().strftime('%B %d, %Y')}",
+                            meta=f"Endometriosis News · {datetime.now().strftime('%B %d, %Y')}",
                             briefing_md=st.session_state["nl_draft"],
+                            kind="newsletter",
                         )
                         _st_components.html(_preview_html, height=900, scrolling=True)
 
@@ -2299,8 +2314,9 @@ For each finding, write a standalone paragraph block — no bullet dashes. Follo
                     with _exp3:
                         _html_export = render_newsletter_html(
                             title=_nl_title or "Newsletter",
-                            meta=f"Endometriosis Intelligence · {datetime.now().strftime('%B %d, %Y')}",
+                            meta=f"Endometriosis News · {datetime.now().strftime('%B %d, %Y')}",
                             briefing_md=st.session_state["nl_draft"],
+                            kind="newsletter",
                         )
                         st.download_button(
                             "⬇ Export .html",
@@ -2905,8 +2921,8 @@ with tab_nl_config:
         )
         _nlc_sel_nl2 = next(n for n in _nlc_saved_nls2 if n["id"] == _nlc_sel_nl2_id)
         _nlc_nl2_text = (_nlc_sel_nl2.get("content_md") or "").strip()
-        _nlc_nl2_title = _nlc_sel_nl2.get("title") or "Endometriosis Newsletter"
-        _nlc_nl2_subject = f"Evidence Gap — {_nlc_nl2_title}"
+        _nlc_nl2_title = _nlc_sel_nl2.get("title") or "Endometriosis News"
+        _nlc_nl2_subject = _nl_subject(_nlc_nl2_title)
         if _nlc_nl2_text:
             with st.expander("Preview newsletter", expanded=False):
                 st.markdown(_nlc_nl2_text)
@@ -2984,6 +3000,7 @@ with tab_nl_config:
                                 title=_nlc_nl2_title,
                                 meta=_nlc_nl2_meta,
                                 briefing_md=_nlc_nl2_text,
+                                kind="newsletter",
                             )
                             st.success(f"✅ Newsletter sent to **{_addr2}**")
                         except Exception as _nl2_err:
@@ -3005,6 +3022,7 @@ with tab_nl_config:
                                 title=_nlc_nl2_title,
                                 meta=_nlc_nl2_meta,
                                 briefing_md=_nlc_nl2_text,
+                                kind="newsletter",
                             )
                             mark_recipient_sent(_nl2_r["id"])
                             _nl2_ok.append(f"{_nl2_r['name']} <{_nl2_r['email']}>")
