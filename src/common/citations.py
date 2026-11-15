@@ -98,7 +98,16 @@ def citation_from_library(row: Dict[str, Any]) -> Dict[str, Any]:
         "doi": clean_doi(row.get("doi")),
         "via": INDEX_NAMES.get(source, source),
         "site": host(str(row.get("url") or "")),
+        "cited_by": _int_or_none(row.get("cited_by_count")),
     }
+
+
+def _int_or_none(v: Any) -> Optional[int]:
+    try:
+        n = int(v)
+    except (TypeError, ValueError):
+        return None
+    return n if n >= 0 else None
 
 
 def citation_from_html(html: str, url: str) -> Dict[str, Any]:
@@ -404,4 +413,7 @@ def format_citation(c: Optional[Dict[str, Any]], fallback_site: str = "") -> str
         parts.append(f"doi:{c['doi']}.")
     if c.get("via") and c["via"].lower() not in where.lower():
         parts.append(f"Indexed in {c['via']}.")
+    if c.get("cited_by"):
+        n = c["cited_by"]
+        parts.append(f"Cited {n:,} time{'s' if n != 1 else ''} (OpenAlex).")
     return " ".join(parts)

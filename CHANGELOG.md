@@ -12,6 +12,19 @@ footer. Keep each version's changes in its own <ul> list. -->
 </thead>
 <tbody>
 
+<tr><td>2026-11-15</td><td>
+
+<b>v1.22.0</b>
+<ul>
+<li><b>PubMed abstracts</b> in the evidence library: PubMed items now have their full abstracts, MeSH terms and publication types (from NCBI's free API), and future library refreshes include them. Find Similar and topic search match on the abstracts.</li>
+<li><b>OpenAlex enrichment</b>: missing abstracts filled for other sources, plus citation counts and open-access links; citation counts show in source citations.</li>
+<li><b>Open-access full text</b> (Europe PMC, free): when a newsletter is generated, featured and supporting articles that are open access are read in full (results, limitations, discussion), so stories use real findings and name the gaps precisely. Other articles use their full abstract. The licence is kept with each text.</li>
+<li>Ask AI checks claims against these full-text excerpts when available; the editor shows how many sources had full text.</li>
+<li>PubMed links found by web search show their abstract instead of a one-line snippet.</li>
+</ul>
+
+</td></tr>
+
 <tr><td>2026-11-14</td><td>
 
 <b>v1.21.0</b>

@@ -37,6 +37,7 @@ from src.common.citations import (
     host,
 )
 from src.common.email_briefing import newsletter_subject
+from src.common.fulltext import enrich_articles
 from src.common.voice_guide import VOICE_GUIDE, VOICE_GUIDE_SHORT, dash_count
 from src.services import ai_service as ai
 from src.ui.wysiwyg import tiptap_editor
@@ -68,8 +69,11 @@ missing from the evidence. Never close with a summary.
 EVIDENCE RULES (these limit what you may claim):
 - Every factual claim cites at least one source using [N] inline, where N is the \
 article number given in the user message.
-- Only use facts present in the provided article titles, summaries, and metadata. \
-If a summary is thin, say less rather than inventing detail. Do not invent \
+- Only use facts present in the provided article titles, summaries, full-text \
+excerpts, and metadata. If a summary is thin, say less rather than inventing detail.
+- Where a full-text excerpt is given, use its results for the numbers and its \
+limitations to name the gap precisely. Paraphrase; quote at most one short phrase \
+per article. Do not invent \
 findings, numbers, trial names, quotes or patients.
 - The human anchor must come from the sources or be a clearly general case \
 ("a patient waiting years for a diagnosis"), never an invented individual or quote.
@@ -332,7 +336,14 @@ def _article_block(n: int, a: Dict[str, Any]) -> str:
         f"{a.get('published_date') or 'unknown'}\n"
         + (f"    Citation: {cite}\n" if cite else "")
         + f"    URL: {a['url']}\n"
-        f"    Summary: {(a.get('snippet') or '(no summary available)')[:1200]}"
+        f"    Summary: {(a.get('snippet') or '(no summary available)')[:1500]}"
+        + (
+            f"\n    Full text excerpt (open access, {a.get('full_text_license') or 'licence unknown'}, "
+            f"{a.get('full_text_source') or 'Europe PMC'}):\n"
+            + "\n".join("      " + line for line in a["full_text_excerpt"].splitlines())
+            if a.get("full_text_excerpt")
+            else ""
+        )
     )
 
 
@@ -614,6 +625,43 @@ def _add_web_citations(results: List[Dict[str, Any]]) -> None:
             found = {}
     for r in web:
         r["citation"] = found.get(r["url"])
+    _add_pubmed_abstracts(web)
+
+
+def _add_pubmed_abstracts(results: List[Dict[str, Any]]) -> None:
+    """PubMed links from web search carry a one-line snippet; use the abstract."""
+    from src.common.fulltext import article_ids
+    from src.connectors.pubmed import fetch_abstracts
+
+    want = {}
+    for r in results:
+        pmid = article_ids(r).get("pmid")
+        if pmid and len(r.get("snippet") or "") < 400:
+            want.setdefault(pmid, []).append(r)
+    if not want:
+        return
+    try:
+        recs = fetch_abstracts(list(want), sleep_s=0)
+    except Exception:
+        return
+    for pmid, rs in want.items():
+        abstract = (recs.get(pmid) or {}).get("abstract") or ""
+        for r in rs:
+            if len(abstract) > len(r.get("snippet") or ""):
+                r["snippet"] = abstract[:1500]
+
+
+def _full_text_note(nl: Dict[str, Any]) -> str:
+    """ " · 📄 open-access full text for 2 of 5 sources" (newsletters built since
+    full text was added)."""
+    try:
+        cfg = json.loads(nl.get("config_json") or "{}")
+    except (TypeError, ValueError):
+        return ""
+    n, total = cfg.get("full_text_sources"), cfg.get("source_count")
+    if n is None or not total:
+        return ""
+    return f" · \U0001f4c4 open-access full text for {n} of {total} sources"
 
 
 def _css(flyout_open: bool, selected_keys: List[str]) -> str:
@@ -1331,6 +1379,10 @@ def _render_newsletter_trials(
                         )
 
 
+FEATURED_FULLTEXT_CHARS = 7000
+SUPPORTING_FULLTEXT_CHARS = 2000
+
+
 def _generate_and_open(
     deps: Dict[str, Any],
     run: Dict[str, Any],
@@ -1342,6 +1394,19 @@ def _generate_and_open(
     """Write the newsletter, save it, and switch to the editing page."""
     topic = st.session_state.get(_k("topic")) or ""
     label = f"Topic search: {topic}" if topic else _run_label(run)
+    # Work on copies: add open-access full text (featured: more) or abstracts
+    base = [dict(a) for a in base]
+    supporting = [dict(a) for a in supporting]
+    n_full = 0
+    with st.spinner("Reading open-access full text and abstracts…"):
+        try:
+            n_full = enrich_articles(
+                base + supporting,
+                [FEATURED_FULLTEXT_CHARS] * len(base)
+                + [SUPPORTING_FULLTEXT_CHARS] * len(supporting),
+            )
+        except Exception:  # full text is a bonus; never block generation
+            n_full = 0
     prompt = _build_prompt(base, supporting, nl_title, label, nl_note)
     with st.spinner("Writing newsletter…"):
         try:
@@ -1363,6 +1428,9 @@ def _generate_and_open(
             "reason": a.get("reason", ""),
             "snippet": (a.get("snippet") or "")[:1500],
             "citation": citation_text(a),
+            "full_text_excerpt": (a.get("full_text_excerpt") or "")[:4000],
+            "full_text_license": a.get("full_text_license", ""),
+            "full_text_source": a.get("full_text_source", ""),
         }
         for i, a in enumerate(base + supporting)
     ]
@@ -1381,6 +1449,8 @@ def _generate_and_open(
             "featured_refs": [b["ref"] for b in base],
             "editorial_note": nl_note,
             "topic": topic,
+            "full_text_sources": n_full,
+            "source_count": len(base) + len(supporting),
         },
     )
     st.session_state[_k("flyout_open")] = False
@@ -1546,6 +1616,7 @@ def render_editor_page(deps: Dict[str, Any]) -> None:
         f"Newsletter #{nid} · {nl.get('coverage_period') or ''} · last saved "
         f"{(nl.get('updated_ts') or '')[:16].replace('T', ' ')} UTC"
         + (" · ⏳ queued for the next daily send" if queued else "")
+        + _full_text_note(nl)
     )
 
     sent = st.session_state.get(_k(f"ed_sent_{nid}"))
@@ -1704,8 +1775,9 @@ How to answer:
 - Ground answers in the newsletter and its sources. Quote or point to the section \
 or source [N] you mean.
 - Use the sources to check claims: say when the newsletter goes beyond, or \
-misstates, what a source says. Only source titles and summaries are available, not \
-full texts.
+misstates, what a source says. Most sources have titles and summaries only; some \
+open-access sources also include full-text excerpts (results, limitations), which \
+are the strongest check.
 - If something is in neither, say so before adding general background, and label \
 general knowledge as such. Never invent studies, numbers, trial names or quotes.
 - Keep answers focused and easy to scan; friendly doesn't mean long.
@@ -1935,7 +2007,8 @@ def _library_tool_handler(deps: Dict[str, Any]):
 
 
 _CHAT_MAX_DOC_CHARS = 60_000
-_CHAT_MAX_SOURCE_CHARS = 1_200
+_CHAT_MAX_SOURCE_CHARS = 1_500
+_CHAT_MAX_FULLTEXT_CHARS = 3_000
 _CHAT_HISTORY_TURNS = 12
 _EDIT_RE = re.compile(
     r"<<<\s*EDIT\s*\n\s*FIND:\s*\n(.*?)\n\s*REPLACE:[ \t]*\n?(.*?)\n?\s*>>>",
@@ -1998,6 +2071,8 @@ def newsletter_sources(
                 "date": s.get("published_date") or "",
                 "url": s.get("url") or "",
                 "summary": summary,
+                "full_text": s.get("full_text_excerpt") or "",
+                "full_text_license": s.get("full_text_license") or "",
             }
         )
     return out
@@ -2017,6 +2092,13 @@ def sources_block(sources: List[Dict[str, str]]) -> str:
             if len(summary) > _CHAT_MAX_SOURCE_CHARS:
                 summary = summary[:_CHAT_MAX_SOURCE_CHARS] + "…"
             lines.append(f"    Summary: {summary}")
+        full = (s.get("full_text") or "").strip()
+        if full:
+            if len(full) > _CHAT_MAX_FULLTEXT_CHARS:
+                full = full[:_CHAT_MAX_FULLTEXT_CHARS] + "…"
+            lic = s.get("full_text_license") or "licence unknown"
+            lines.append(f"    Full text excerpt (open access, {lic}):")
+            lines.extend("      " + line for line in full.splitlines())
     return "\n".join(lines)
 
 

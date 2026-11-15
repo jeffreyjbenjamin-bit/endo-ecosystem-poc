@@ -24,6 +24,11 @@ def main():
     # ----- PubMed (fully scalable) -----
     ids = pubmed.search_ids(args.term, retmax=args.limit)
     pubmed_payload = pubmed.fetch_summaries(ids)
+    # Summaries carry no abstracts: add them (and MeSH terms) from EFetch
+    try:
+        pubmed_payload["abstracts"] = pubmed.fetch_abstracts(ids)
+    except Exception as exc:  # summaries are still useful without them
+        print(f"  PubMed abstracts unavailable: {exc}")
     uri_pubmed = save_raw_json("pubmed", "batch", pubmed_payload)
 
     # ----- ClinicalTrials.gov -----
