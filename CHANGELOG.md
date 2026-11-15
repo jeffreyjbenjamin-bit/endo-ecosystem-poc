@@ -14,6 +14,12 @@ footer. Keep each version's changes in its own <ul> list. -->
 
 <tr><td>2026-11-15</td><td>
 
+<b>v1.22.1</b>
+<ul>
+<li>Build Newsletter cards show a <b>📄 Full text</b> tag when an open-access full-text copy is available (briefing articles, topic results and Find Similar results), with a count of how many are available. The check runs in the background, so the page stays fast.</li>
+<li>Full-text lookup now also finds articles by title when the link has no DOI or PubMed ID (most publisher pages).</li>
+</ul>
+
 <b>v1.22.0</b>
 <ul>
 <li><b>PubMed abstracts</b> in the evidence library: PubMed items now have their full abstracts, MeSH terms and publication types (from NCBI's free API), and future library refreshes include them. Find Similar and topic search match on the abstracts.</li>

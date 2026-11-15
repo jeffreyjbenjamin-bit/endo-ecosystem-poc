@@ -14,6 +14,7 @@ app state directory (fulltext/), including "not open access" answers.
 
 from __future__ import annotations
 
+import difflib
 import hashlib
 import json
 import re
@@ -130,39 +131,112 @@ def _clean_html(text: str) -> str:
     return " ".join(unescape(re.sub(r"<[^>]+>", " ", text or "")).split())
 
 
-def lookup(a: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """Europe PMC record for an article, or None if it isn't indexed there."""
-    q = _query(article_ids(a))
-    if not q:
-        return None
-    cached = _cache_get("lookup:" + q)
-    if cached != "__miss__":
-        return cached
+def _norm_title(t: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", (t or "").lower()).strip()
+
+
+def _record(x: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "pmid": x.get("pmid") or "",
+        "pmcid": x.get("pmcid") or "",
+        "doi": clean_doi(x.get("doi")),
+        "is_oa": x.get("isOpenAccess") == "Y",
+        "in_pmc": x.get("inPMC") == "Y" or x.get("inEPMC") == "Y",
+        "license": (x.get("license") or "").upper(),
+        "abstract": _clean_html(x.get("abstractText") or ""),
+        "title": _clean_html(x.get("title") or ""),
+    }
+
+
+def _search(q: str, page_size: int = 1) -> Optional[List[Dict[str, Any]]]:
+    """Europe PMC search results, or None on network trouble (not cached)."""
     try:
         r = requests.get(
             f"{EPMC}/search",
-            params={"query": q, "resultType": "core", "format": "json", "pageSize": 1},
+            params={
+                "query": q,
+                "resultType": "core",
+                "format": "json",
+                "pageSize": page_size,
+            },
             timeout=_TIMEOUT,
         )
         r.raise_for_status()
-        results = (r.json().get("resultList") or {}).get("result") or []
+        return (r.json().get("resultList") or {}).get("result") or []
     except Exception:
-        return None  # network trouble: don't cache, try again next time
-    rec = None
-    if results:
-        x = results[0]
-        rec = {
-            "pmid": x.get("pmid") or "",
-            "pmcid": x.get("pmcid") or "",
-            "doi": clean_doi(x.get("doi")),
-            "is_oa": x.get("isOpenAccess") == "Y",
-            "in_pmc": x.get("inPMC") == "Y" or x.get("inEPMC") == "Y",
-            "license": (x.get("license") or "").upper(),
-            "abstract": _clean_html(x.get("abstractText") or ""),
-            "title": _clean_html(x.get("title") or ""),
-        }
+        return None
+
+
+def title_match(a: str, b: str) -> bool:
+    """Same article title, allowing punctuation, case and small edits."""
+    na, nb = _norm_title(a), _norm_title(b)
+    if not na or not nb:
+        return False
+    if na == nb or (len(na) > 40 and (na.startswith(nb) or nb.startswith(na))):
+        return True
+    return difflib.SequenceMatcher(None, na, nb).ratio() >= 0.92
+
+
+def lookup(a: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Europe PMC record for an article, or None if it isn't indexed there.
+
+    Uses the article's PMCID, PMID or DOI; when a link carries none of these
+    (most publisher pages), searches by the article's exact title instead.
+    """
+    q = _query(article_ids(a))
+    title = (a.get("title") or "").strip()
+    if not q:
+        # Title fallback: long enough to be specific, and verified on return
+        words = _norm_title(title).split()
+        if len(words) < 5:
+            return None
+        key = "lookup:title:" + _norm_title(title)
+        cached = _cache_get(key)
+        if cached != "__miss__":
+            return cached
+        quoted = title.replace('"', " ")
+        results = _search(f'TITLE:"{quoted}"', page_size=3)
+        if results is None:
+            return None
+        rec = next(
+            (_record(x) for x in results if title_match(x.get("title") or "", title)),
+            None,
+        )
+        _cache_put(key, rec)
+        return rec
+    cached = _cache_get("lookup:" + q)
+    if cached != "__miss__":
+        return cached
+    results = _search(q)
+    if results is None:
+        return None
+    rec = _record(results[0]) if results else None
     _cache_put("lookup:" + q, rec)
     return rec
+
+
+def availability(a: Dict[str, Any]) -> str:
+    """ "full_text" (open-access text we can read), "abstract", or "" (unknown)."""
+    if a.get("origin") == "clinical_trial" or "clinicaltrials.gov" in (
+        a.get("url") or ""
+    ):
+        return ""
+    rec = lookup(a)
+    if not rec:
+        return ""
+    if rec.get("is_oa") and rec.get("pmcid"):
+        return "full_text"
+    return "abstract" if rec.get("abstract") else ""
+
+
+def availability_for(
+    articles: List[Dict[str, Any]], max_workers: int = 8
+) -> Dict[str, str]:
+    """{article key: availability} for many articles (parallel, cached)."""
+    keyed = [a for a in articles if a.get("key")]
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        found = list(pool.map(availability, keyed))
+    return {a["key"]: f for a, f in zip(keyed, found)}
 
 
 def _text(el: ET.Element) -> str:

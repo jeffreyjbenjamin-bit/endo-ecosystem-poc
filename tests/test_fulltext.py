@@ -212,3 +212,67 @@ def test_full_text_reaches_prompt_and_chat():
         }
     ]
     assert "Full text excerpt (open access, CC BY):" in sources_block(src)
+
+
+def test_title_fallback_lookup_and_availability(tmp_path, monkeypatch):
+    monkeypatch.setattr(ft, "state_path", lambda name: str(tmp_path / name))
+    calls = []
+
+    def fake_search(q, page_size=1):
+        calls.append(q)
+        return [
+            {
+                "title": "Something else entirely about pain",
+                "pmcid": "PMC9",
+                "isOpenAccess": "Y",
+            },
+            {
+                "title": "Earlier diagnosis without access to treatment is only half "
+                "the answer.",
+                "pmcid": "PMC5",
+                "isOpenAccess": "Y",
+                "license": "cc by",
+                "abstractText": "<p>Abstract</p>",
+            },
+        ]
+
+    monkeypatch.setattr(ft, "_search", fake_search)
+    a = {
+        "url": "https://www.bmj.com/content/395/x.full",
+        "title": "Earlier diagnosis without access to treatment is only half the answer",
+    }
+    rec = ft.lookup(a)
+    assert calls[0].startswith('TITLE:"Earlier diagnosis')
+    assert rec["pmcid"] == "PMC5" and rec["license"] == "CC BY"
+    assert ft.availability(a) == "full_text"
+    ft.lookup(a)
+    assert len(calls) == 1  # cached, including for availability()
+    # short or unmatched titles are not guessed
+    assert ft.lookup({"url": "https://x.org/a", "title": "Endometriosis news"}) is None
+    assert ft.availability({"origin": "clinical_trial", "title": "x" * 50}) == ""
+
+
+def test_check_availability_runs_in_background(monkeypatch):
+    import time
+
+    from src.ui import newsletter_from_briefing as nb
+
+    monkeypatch.setattr(
+        nb, "availability", lambda a: "full_text" if "oa" in a["url"] else ""
+    )
+    monkeypatch.setattr(nb, "_AVAIL_RESULTS", {})
+    monkeypatch.setattr(nb, "_AVAIL_FUTURES", {})
+    arts = [
+        {"key": "k1", "url": "https://oa.org/1"},
+        {"key": "k2", "url": "https://p/2"},
+        {"key": "t", "url": "https://ct", "origin": "clinical_trial"},
+    ]
+    assert nb.check_availability(arts) == 2  # started, not blocking
+    for _ in range(50):
+        if nb.check_availability([dict(a) for a in arts]) == 0:
+            break
+        time.sleep(0.05)
+    nb.check_availability(arts)
+    assert arts[0]["availability"] == "full_text" and arts[1]["availability"] == ""
+    assert "Full text" in nb._card_html({**arts[0], "title": "T"}, "[1]")
+    assert "Full text" not in nb._card_html({**arts[1], "title": "T"}, "[2]")

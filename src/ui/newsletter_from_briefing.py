@@ -24,6 +24,8 @@ from __future__ import annotations
 import hashlib
 import html as html_lib
 import json
+from concurrent.futures import ThreadPoolExecutor
+import threading
 import re
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Set, Tuple
@@ -37,7 +39,7 @@ from src.common.citations import (
     host,
 )
 from src.common.email_briefing import newsletter_subject
-from src.common.fulltext import enrich_articles
+from src.common.fulltext import availability, enrich_articles
 from src.common.voice_guide import VOICE_GUIDE, VOICE_GUIDE_SHORT, dash_count
 from src.services import ai_service as ai
 from src.ui.wysiwyg import tiptap_editor
@@ -581,7 +583,7 @@ def _card_html(a: Dict[str, Any], right_label: str, extra_html: str = "") -> str
     )
     excerpt = _esc((a.get("snippet") or "").replace("\n", " ")[:500])
     return (
-        f'<div><span class="endo-badge {cls}">{label}</span>'
+        f'<div><span class="endo-badge {cls}">{label}</span>{_full_text_tag(a)}'
         f'<span class="endo-quality">{right_label}</span></div>'
         f'<div class="endo-title">{title_html}</div>'
         f'<div class="endo-meta">{meta}</div>'
@@ -611,6 +613,70 @@ def _citation_html(a: Dict[str, Any]) -> str:
             f'rel="noopener">doi:{_esc(doi)}</a>',
         )
     return f'<div class="nb2-cite">\U0001f4d6 {html}</div>'
+
+
+# ── Open-access full-text availability (checked in the background) ─────────
+# Results are shared across sessions; the disk cache in src.common.fulltext
+# makes repeat checks instant, so only the first view of new articles waits.
+_AVAIL_POOL = ThreadPoolExecutor(max_workers=12, thread_name_prefix="ft-avail")
+_AVAIL_RESULTS: Dict[str, str] = {}
+_AVAIL_FUTURES: Dict[str, Any] = {}
+_AVAIL_LOCK = threading.Lock()
+
+
+def _avail_key(a: Dict[str, Any]) -> str:
+    return f"{a.get('key', '')}|{a.get('url', '')}"
+
+
+def check_availability(articles: List[Dict[str, Any]]) -> int:
+    """Set a["availability"] ("full_text" / "abstract" / "") where known and
+    start background checks for the rest. Returns how many are still pending."""
+    pending = 0
+    with _AVAIL_LOCK:
+        for a in articles:
+            if not a.get("key") or a.get("origin") == "clinical_trial":
+                continue
+            k = _avail_key(a)
+            if k in _AVAIL_RESULTS:
+                a["availability"] = _AVAIL_RESULTS[k]
+                continue
+            fut = _AVAIL_FUTURES.get(k)
+            if fut is None:
+                _AVAIL_FUTURES[k] = _AVAIL_POOL.submit(availability, dict(a))
+                pending += 1
+            elif fut.done():
+                try:
+                    _AVAIL_RESULTS[k] = fut.result() or ""
+                except Exception:
+                    _AVAIL_RESULTS[k] = ""
+                _AVAIL_FUTURES.pop(k, None)
+                a["availability"] = _AVAIL_RESULTS[k]
+            else:
+                pending += 1
+    return pending
+
+
+@st.fragment(run_every=2)
+def _availability_watch(articles: List[Dict[str, Any]]) -> None:
+    """Progress note while availability checks run; redraws the cards when done."""
+    probe = [dict(a) for a in articles]
+    pending = check_availability(probe)
+    if not pending:
+        st.rerun()  # whole page: draw the Full text tags
+    done = len([a for a in probe if a.get("key")]) - pending
+    st.caption(
+        f"\U0001f4c4 Checking which articles have open-access full text\u2026 "
+        f"{max(done, 0)}/{len(probe)}"
+    )
+
+
+def _full_text_tag(a: Dict[str, Any]) -> str:
+    if a.get("availability") != "full_text":
+        return ""
+    return (
+        '<span class="nb2-ft" title="Open-access full text is available (Europe PMC). '
+        'It will be read when you generate a newsletter.">\U0001f4c4 Full text</span>'
+    )
 
 
 def _add_web_citations(results: List[Dict[str, Any]]) -> None:
@@ -690,6 +756,9 @@ def _css(flyout_open: bool, selected_keys: List[str]) -> str:
         border-left:3px solid #c99a2e; border-radius:4px; padding:5px 9px;
         margin:4px 0 6px 0; line-height:1.4; }}
       .nb2-cite a {{ color:#a8243c; }}
+      .nb2-ft {{ display:inline-block; margin-left:6px; font-size:0.68rem;
+        font-weight:700; padding:1px 7px; border-radius:4px; background:#f8f0dc;
+        color:#7a5a12; border:1px solid #e2d3a8; cursor:help; vertical-align:1px; }}
       .nb2-reason {{ font-size:0.84rem; color:#141210; background:#f8f0dc;
         border-left:3px solid #a8243c; border-radius:4px; padding:6px 9px; margin:6px 0 8px 0; }}
       .st-key-nb2_flyout {{
@@ -914,6 +983,8 @@ def render_tab(deps: Dict[str, Any]) -> None:
     topic = st.session_state.get(_k("topic")) or ""
     topic_results = st.session_state.get(_k("topic_results")) or []
     articles = topic_results if topic else _briefing_articles(run)
+    flyout_results = st.session_state.get(_k("results")) or []
+    avail_pending = check_availability(articles + flyout_results)
     base_key = lambda a: _k(f"base_{a['key']}")  # noqa: E731
     trial_arts = _newsletter_trial_articles()
     base = [a for a in articles + trial_arts if st.session_state.get(base_key(a))]
@@ -1080,6 +1151,16 @@ def render_tab(deps: Dict[str, Any]) -> None:
     with c3:
         with st.popover("View briefing text", use_container_width=True):
             st.markdown(run.get("briefing_text") or "_(empty)_")
+
+    if avail_pending:
+        _availability_watch(articles + flyout_results)
+    else:
+        n_ft = sum(1 for a in articles if a.get("availability") == "full_text")
+        if n_ft:
+            st.caption(
+                f"\U0001f4c4 {n_ft} of {len(articles)} articles have open-access "
+                "full text, read in full when you generate a newsletter."
+            )
 
     shown = [
         a
