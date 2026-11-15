@@ -217,7 +217,7 @@ def lookup(a: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 
 def availability(a: Dict[str, Any]) -> str:
     """ "full_text" (open-access text we can read), "abstract", or "" (unknown)."""
-    if a.get("origin") == "clinical_trial" or "clinicaltrials.gov" in (
+    if a.get("origin") in ("clinical_trial", "upload") or "clinicaltrials.gov" in (
         a.get("url") or ""
     ):
         return ""
@@ -356,7 +356,7 @@ def enrich_articles(
 
     def work(item):
         a, budget = item
-        if a.get("origin") == "clinical_trial":
+        if a.get("origin") in ("clinical_trial", "upload"):
             return False
         ft = full_text(a)
         if ft:

@@ -14,6 +14,13 @@ footer. Keep each version's changes in its own <ul> list. -->
 
 <tr><td>2026-11-15</td><td>
 
+<b>v1.23.0</b>
+<ul>
+<li><b>Upload files</b> on Build Newsletter from Intel Briefing (<b>📎 Your files</b>): Word (.docx), PDF and images. <b>Feature</b> a file to generate a newsletter from it, or <b>include</b> it as a supporting source; it is cited by file name.</li>
+<li><b>📎 Attach files</b> in Ask AI: attached files are saved with the newsletter and inform answers and suggested edits from then on.</li>
+<li>Images are described by AI (visible text transcribed, chart values listed, gaps noted); scanned PDFs without a text layer are read by AI. Only the extracted text is kept, not the original file. Text in files is treated as material, never as instructions.</li>
+</ul>
+
 <b>v1.22.1</b>
 <ul>
 <li>Build Newsletter cards show a <b>📄 Full text</b> tag when an open-access full-text copy is available (briefing articles, topic results and Find Similar results), with a count of how many are available. The check runs in the background, so the page stays fast.</li>

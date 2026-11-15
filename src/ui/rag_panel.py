@@ -429,6 +429,17 @@ def update_newsletter(nid: int, content_md: str) -> None:
     conn.close()
 
 
+def update_newsletter_sources(nid: int, sources: List[Dict[str, Any]]) -> None:
+    """Replace a newsletter's saved source list (e.g. files attached in Ask AI)."""
+    conn = _ensure_newsletter_db()
+    conn.execute(
+        "UPDATE newsletters SET sources_json=? WHERE id=?",
+        (json.dumps(sources), nid),
+    )
+    conn.commit()
+    conn.close()
+
+
 def load_newsletters(limit: int = 20) -> List[Dict[str, Any]]:
     if not Path(NEWSLETTER_DB).exists():
         return []
@@ -1026,6 +1037,7 @@ def _nb2_deps() -> Dict[str, Any]:
         "chat_deployment": _NB2_DEPLOY,
         "save_newsletter": save_newsletter,
         "update_newsletter": update_newsletter,
+        "update_newsletter_sources": update_newsletter_sources,
         "load_newsletter": load_newsletter,
         "load_newsletters": load_newsletters,
         "get_nl_config": get_nl_config,

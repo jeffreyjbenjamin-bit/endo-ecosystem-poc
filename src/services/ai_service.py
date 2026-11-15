@@ -83,6 +83,11 @@ FEATURES: Dict[str, Dict[str, Any]] = {
         "effort": "high",
         "max_tokens": 32000,
     },
+    "files": {
+        "label": "Reading uploaded images and scanned PDFs",
+        "effort": "low",
+        "max_tokens": 8000,
+    },
 }
 
 # Which setting picks the provider for each feature.
@@ -90,6 +95,7 @@ _PROVIDER_ENV = {
     "newsletter": "NEWSLETTER_AI_PROVIDER",
     "chat": "NEWSLETTER_AI_PROVIDER",
     "trends": "TRENDS_AI_PROVIDER",
+    "files": "NEWSLETTER_AI_PROVIDER",
 }
 _DEFAULT_FEATURE = {"label": "AI", "effort": "medium", "max_tokens": 16000}
 
